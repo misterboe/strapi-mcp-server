@@ -1,6 +1,6 @@
 {
     "name": "@bschauer/strapi-mcp-server",
-    "version": "1.0.1",
+    "version": "2.0.0",
     "description": "Model Context Protocol server implementation for Strapi CMS",
     "type": "module",
     "bin": {

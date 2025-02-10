@@ -22,7 +22,11 @@ You can use this server directly with npx in your Claude Desktop configuration:
   "mcpServers": {
     "strapi": {
       "command": "npx",
-      "args": ["-y", "@bschauer/strapi-mcp-server"]
+      "args": ["-y", "@bschauer/strapi-mcp-server"],
+      "env": {
+        "API_URL": "http://localhost:1337",
+        "JWT": "your-jwt-token"
+      }
     }
   }
 }
@@ -34,13 +38,9 @@ Create a configuration file at `~/.mcp/strapi-mcp-server.config.json`:
 
 ```json
 {
-  "grow": {
+  "myserver": {
     "api_url": "http://localhost:1337",
-    "api_key": "your-jwt-token"
-  },
-  "production": {
-    "api_url": "https://api.example.com",
-    "api_key": "your-production-jwt-token"
+    "api_key": "your-jwt-token-from-strapi-admin"
   }
 }
 ```
@@ -66,12 +66,12 @@ strapi_list_servers();
 ```javascript
 // Get all content types from a specific server
 strapi_get_content_types({
-  server: "grow",
+  server: "myserver",
 });
 
 // Get components
 strapi_get_components({
-  server: "grow",
+  server: "myserver",
 });
 ```
 
@@ -80,7 +80,7 @@ strapi_get_components({
 ```javascript
 // Query content
 strapi_rest({
-  server: "grow",
+  server: "myserver",
   endpoint: "api/articles",
   method: "GET",
   params: { populate: "*" },
@@ -92,7 +92,7 @@ strapi_rest({
 ```javascript
 // Upload image
 strapi_upload_media({
-  server: "grow",
+  server: "myserver",
   url: "https://example.com/image.jpg",
   format: "webp",
   quality: 80,

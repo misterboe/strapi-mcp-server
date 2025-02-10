@@ -24,6 +24,10 @@ let config: Record<string, { api_url: string, api_key: string }>;
 try {
     const configContent = readFileSync(CONFIG_PATH, 'utf-8');
     config = JSON.parse(configContent);
+
+    if (Object.keys(config).length === 0) {
+        throw new Error('Config file exists but is empty');
+    }
 } catch (error) {
     console.error('Error reading config file:', error);
     config = {};
@@ -45,9 +49,44 @@ const server = new Server(
 
 // Helper function to get server config
 function getServerConfig(serverName: string): { API_URL: string, JWT: string } {
+    if (Object.keys(config).length === 0) {
+        const exampleConfig = {
+            "myserver": {
+                "api_url": "http://localhost:1337",
+                "api_key": "your-jwt-token-from-strapi-admin"
+            }
+        };
+
+        throw new Error(
+            `No server configuration found!\n\n` +
+            `Please create a configuration file at:\n` +
+            `${CONFIG_PATH}\n\n` +
+            `Example configuration:\n` +
+            `${JSON.stringify(exampleConfig, null, 2)}\n\n` +
+            `Steps to set up:\n` +
+            `1. Create the .mcp directory: mkdir -p ~/.mcp\n` +
+            `2. Create the config file: touch ~/.mcp/strapi-mcp-server.config.json\n` +
+            `3. Add your server configuration using the example above\n` +
+            `4. Get your JWT token from Strapi Admin Panel > Settings > API Tokens\n` +
+            `5. Make sure the file permissions are secure: chmod 600 ~/.mcp/strapi-mcp-server.config.json`
+        );
+    }
+
     const serverConfig = config[serverName];
     if (!serverConfig) {
-        throw new Error(`Server "${serverName}" not found in config. Available servers: ${Object.keys(config).join(', ')}`);
+        throw new Error(
+            `Server "${serverName}" not found in config.\n\n` +
+            `Available servers: ${Object.keys(config).join(', ')}\n\n` +
+            `To add a new server, edit:\n` +
+            `${CONFIG_PATH}\n\n` +
+            `Example configuration:\n` +
+            `{\n` +
+            `  "${serverName}": {\n` +
+            `    "api_url": "http://localhost:1337",\n` +
+            `    "api_key": "your-jwt-token-from-strapi-admin"\n` +
+            `  }\n` +
+            `}`
+        );
     }
     return {
         API_URL: serverConfig.api_url,
@@ -615,6 +654,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
         if (name === "strapi_list_servers") {
+            if (Object.keys(config).length === 0) {
+                const exampleConfig = {
+                    "myserver": {
+                        "api_url": "http://localhost:1337",
+                        "api_key": "your-jwt-token-from-strapi-admin"
+                    }
+                };
+
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify({
+                                error: "No servers configured",
+                                help: {
+                                    message: "No server configuration found. Please create a configuration file.",
+                                    config_path: CONFIG_PATH,
+                                    example_config: exampleConfig,
+                                    setup_steps: [
+                                        "Create the .mcp directory: mkdir -p ~/.mcp",
+                                        "Create the config file: touch ~/.mcp/strapi-mcp-server.config.json",
+                                        "Add your server configuration using the example above",
+                                        "Get your JWT token from Strapi Admin Panel > Settings > API Tokens",
+                                        "Make sure the file permissions are secure: chmod 600 ~/.mcp/strapi-mcp-server.config.json"
+                                    ]
+                                }
+                            }, null, 2),
+                        },
+                    ],
+                };
+            }
+
             const servers = Object.keys(config).map(serverName => ({
                 name: serverName,
                 api_url: config[serverName].api_url
@@ -624,7 +695,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 content: [
                     {
                         type: "text",
-                        text: JSON.stringify({ servers }, null, 2),
+                        text: JSON.stringify({
+                            servers,
+                            config_path: CONFIG_PATH,
+                            help: "To add more servers, edit the configuration file at the path shown above."
+                        }, null, 2),
                     },
                 ],
             };
