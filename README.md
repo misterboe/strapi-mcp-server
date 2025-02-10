@@ -1,17 +1,17 @@
 # Strapi MCP Server
 
-A Model Context Protocol server for interacting with Strapi CMS. This server enables AI assistants to interact with your Strapi instance through a standardized interface, supporting content types, REST API, and GraphQL queries.
+A Model Context Protocol server for interacting with Strapi CMS. This server enables AI assistants to interact with your Strapi instance through a standardized interface, supporting content types and REST API operations.
 
 ## Features
 
 - 🔍 Schema introspection
-- 🔄 REST API support
-- 📊 GraphQL support
+- 🔄 REST API support with validation
 - 📸 Media upload handling
 - 🔐 JWT authentication
 - 📝 Content type management
 - 🖼️ Image processing with format conversion
 - 🌐 Multiple server support
+- ✅ Automatic schema validation
 
 ## Installation
 
@@ -77,20 +77,63 @@ strapi_get_components({
 
 ### REST API
 
+The REST API provides comprehensive CRUD operations with built-in validation:
+
 ```javascript
-// Query content
+// Query content with filters
 strapi_rest({
   server: "myserver",
   endpoint: "api/articles",
   method: "GET",
-  params: { populate: "*" },
+  params: {
+    filters: {
+      title: {
+        $contains: "search term",
+      },
+    },
+    populate: "*",
+  },
+});
+
+// Create new content
+strapi_rest({
+  server: "myserver",
+  endpoint: "api/articles",
+  method: "POST",
+  body: {
+    data: {
+      title: "New Article",
+      content: "Article content",
+      category: "news",
+    },
+  },
+});
+
+// Update content
+strapi_rest({
+  server: "myserver",
+  endpoint: "api/articles/123",
+  method: "PUT",
+  body: {
+    data: {
+      title: "Updated Title",
+      content: "Updated content",
+    },
+  },
+});
+
+// Delete content
+strapi_rest({
+  server: "myserver",
+  endpoint: "api/articles/123",
+  method: "DELETE",
 });
 ```
 
 ### Media Upload
 
 ```javascript
-// Upload image
+// Upload image with automatic optimization
 strapi_upload_media({
   server: "myserver",
   url: "https://example.com/image.jpg",
@@ -111,6 +154,76 @@ strapi_upload_media({
 3. Include error handling in your queries
 4. Validate URLs before upload
 5. Use appropriate content population strategies
+6. Always include the complete data object when updating
+7. Use filters to optimize query performance
+8. Leverage built-in schema validation
+
+## REST API Tips
+
+### Filtering
+
+```javascript
+// Filter by field value
+params: {
+  filters: {
+    title: "Exact Match";
+  }
+}
+
+// Contains filter
+params: {
+  filters: {
+    title: {
+      $contains: "partial";
+    }
+  }
+}
+
+// Multiple conditions
+params: {
+  filters: {
+    $and: [{ category: "news" }, { published: true }];
+  }
+}
+```
+
+### Sorting
+
+```javascript
+params: {
+  sort: ["createdAt:desc"];
+}
+```
+
+### Pagination
+
+```javascript
+params: {
+  pagination: {
+    page: 1,
+    pageSize: 25
+  }
+}
+```
+
+### Population
+
+```javascript
+// Populate all relations
+params: {
+  populate: "*"
+}
+
+// Populate specific fields
+params: {
+  populate: {
+    category: true,
+    author: {
+      fields: ["name", "email"]
+    }
+  }
+}
+```
 
 ## Troubleshooting
 
@@ -128,11 +241,11 @@ Common issues and solutions:
    - Check token permissions
    - Ensure server is properly configured in config file
 
-3. GraphQL Issues
+3. Validation Errors
 
-   - Verify GraphQL is enabled in Strapi
-   - Check query syntax
-   - Ensure proper field selection
+   - Check required fields are provided
+   - Verify data types match schema
+   - Ensure related content exists
 
 4. Configuration Issues
    - Check if `~/.mcp/strapi-mcp-server.config.json` exists

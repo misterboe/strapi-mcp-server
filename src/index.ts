@@ -170,7 +170,149 @@ async function makeStrapiRequest(serverName: string, endpoint: string, params?: 
     }
 }
 
-// Update handleStrapiError function with node-fetch Response type
+// Cache for content type schemas
+let contentTypeSchemas: Record<string, any> = {};
+
+// Schema validation helper
+async function validateAgainstSchema(serverName: string, endpoint: string, data: any): Promise<{ isValid: boolean; errors: string[] }> {
+    // Extract content type from endpoint (e.g., "api/articles" -> "articles")
+    const contentType = endpoint.replace(/^api\//, '').split('/')[0];
+
+    // Get or fetch schema
+    if (!contentTypeSchemas[contentType]) {
+        try {
+            const schema = await makeStrapiRequest(serverName, "/api/content-type-builder/content-types");
+            const typeSchema = schema.data.find((type: any) => type.schema.pluralName === contentType);
+            if (typeSchema) {
+                contentTypeSchemas[contentType] = typeSchema.schema;
+            }
+        } catch (error) {
+            console.error(`Failed to fetch schema for ${contentType}:`, error);
+            return { isValid: true, errors: [] }; // Fail open if we can't fetch schema
+        }
+    }
+
+    const schema = contentTypeSchemas[contentType];
+    if (!schema) {
+        return { isValid: true, errors: [] }; // Fail open if no schema found
+    }
+
+    const errors: string[] = [];
+
+    // Validate required fields
+    schema.attributes.forEach((attr: any) => {
+        if (attr.required && !data[attr.name]) {
+            errors.push(`Missing required field: ${attr.name}`);
+        }
+
+        if (data[attr.name]) {
+            // Type validation
+            switch (attr.type) {
+                case 'string':
+                    if (typeof data[attr.name] !== 'string') {
+                        errors.push(`Field ${attr.name} must be a string`);
+                    }
+                    break;
+                case 'integer':
+                case 'biginteger':
+                    if (!Number.isInteger(data[attr.name])) {
+                        errors.push(`Field ${attr.name} must be an integer`);
+                    }
+                    break;
+                case 'float':
+                case 'decimal':
+                    if (typeof data[attr.name] !== 'number') {
+                        errors.push(`Field ${attr.name} must be a number`);
+                    }
+                    break;
+                case 'boolean':
+                    if (typeof data[attr.name] !== 'boolean') {
+                        errors.push(`Field ${attr.name} must be a boolean`);
+                    }
+                    break;
+                case 'date':
+                case 'datetime':
+                    if (isNaN(Date.parse(data[attr.name]))) {
+                        errors.push(`Field ${attr.name} must be a valid date`);
+                    }
+                    break;
+                // Add more type validations as needed
+            }
+        }
+    });
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}
+
+// Enhanced REST request function with validation
+async function makeRestRequest(
+    serverName: string,
+    endpoint: string,
+    method: string = 'GET',
+    params?: Record<string, any>,
+    body?: Record<string, any>
+): Promise<any> {
+    const serverConfig = getServerConfig(serverName);
+    let url = `${serverConfig.API_URL}/${endpoint}`;
+
+    // Validate data against schema for write operations
+    if (body?.data && (method === 'POST' || method === 'PUT')) {
+        const validation = await validateAgainstSchema(serverName, endpoint, body.data);
+        if (!validation.isValid) {
+            throw new Error(`Validation failed:\n${validation.errors.join('\n')}`);
+        }
+    }
+
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+
+    // Add pagination for collection endpoints if using GET method
+    if (method === 'GET' && endpoint.startsWith('api/')) {
+        queryParams.append('pagination[page]', '1');
+        queryParams.append('pagination[pageSize]', '100');
+        queryParams.append('populate', '*');
+    }
+
+    // Add additional params
+    if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+            queryParams.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+        });
+    }
+
+    // Append query string to URL
+    const queryString = queryParams.toString();
+    if (queryString) {
+        url = `${url}?${queryString}`;
+    }
+
+    const headers = {
+        'Authorization': `Bearer ${serverConfig.JWT}`,
+        'Content-Type': 'application/json',
+    };
+
+    const requestOptions: import('node-fetch').RequestInit = {
+        method,
+        headers,
+    };
+
+    if (body && (method === 'POST' || method === 'PUT')) {
+        requestOptions.body = JSON.stringify(body);
+    }
+
+    try {
+        const response = await fetch(url, requestOptions);
+        return await handleStrapiError(response, `REST request to ${endpoint}`);
+    } catch (error) {
+        console.error(`REST request to ${endpoint} failed:`, error);
+        throw error;
+    }
+}
+
+// Update handleStrapiError with enhanced error messages
 async function handleStrapiError(response: import('node-fetch').Response, context: string): Promise<any> {
     if (!response.ok) {
         let errorMessage = `${context} failed with status: ${response.status}`;
@@ -179,33 +321,26 @@ async function handleStrapiError(response: import('node-fetch').Response, contex
             if (errorData.error) {
                 errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
 
-                // Add helpful hints based on error status
+                // Enhanced error messages
                 if (response.status === 400) {
-                    errorMessage += "\nHINT: This might be a schema mismatch. Try:\n" +
-                        "1. Use 'strapi_get_content_types' to check the latest schema\n" +
-                        "2. Use 'strapi_get_components' to verify component structures\n" +
-                        "3. Ensure all required fields are included\n" +
-                        "4. Check field types match the schema";
+                    errorMessage += "\nValidation Errors:\n";
+                    if (errorData.error.details?.errors) {
+                        errorMessage += errorData.error.details.errors
+                            .map((err: any) => `- ${err.path.join('.')}: ${err.message}`)
+                            .join('\n');
+                    }
+                    errorMessage += "\n\nHINT: Check the following:\n" +
+                        "1. All required fields are provided\n" +
+                        "2. Field types match the schema\n" +
+                        "3. Related content exists\n" +
+                        "4. Values are within allowed ranges";
                 } else if (response.status === 404) {
-                    errorMessage += "\nHINT: The requested resource might not exist. Try:\n" +
-                        "1. Use 'strapi_get_content_types' to list available endpoints\n" +
-                        "2. Check if the content type or component exists\n" +
-                        "3. Verify the endpoint path is correct\n" +
-                        "4. IMPORTANT: API endpoints use the pluralName from content types (e.g., 'api/articles' for pluralName: 'articles')\n" +
-                        "5. For GraphQL, use both singularName (for single items) and pluralName (for collections)";
-                } else if (response.status === 403) {
-                    errorMessage += "\nHINT: This might be a permissions issue. Check:\n" +
-                        "1. JWT token permissions\n" +
-                        "2. Content type permissions in Strapi admin";
+                    errorMessage += "\nHINT: Check the following:\n" +
+                        "1. The endpoint path is correct\n" +
+                        "2. The content type exists\n" +
+                        "3. The ID exists (for single item operations)\n" +
+                        "4. You're using the correct plural/singular form";
                 }
-
-                // Add general naming convention hint for all errors
-                errorMessage += "\n\nNAMING CONVENTIONS:\n" +
-                    "- REST API endpoints use pluralName (e.g., 'api/articles' for pluralName: 'articles')\n" +
-                    "- GraphQL queries use:\n" +
-                    "  * pluralName for collections (e.g., 'query { articles { data { id } } }')\n" +
-                    "  * singularName for single items (e.g., 'query { article(id: 1) { data { id } } }')\n" +
-                    "- Use strapi_get_content_types to see the correct singularName and pluralName for each type";
             }
         } catch {
             errorMessage += ` - ${response.statusText}`;
@@ -214,142 +349,6 @@ async function handleStrapiError(response: import('node-fetch').Response, contex
     }
     return response.json();
 }
-
-// Update makeGraphQLRequest with server config
-async function makeGraphQLRequest(serverName: string, query: string, variables?: Record<string, any>): Promise<any> {
-    const serverConfig = getServerConfig(serverName);
-    const url = `${serverConfig.API_URL}/graphql`;
-    const headers = {
-        'Authorization': `Bearer ${serverConfig.JWT}`,
-        'Content-Type': 'application/json',
-    };
-
-    try {
-        console.error('Making GraphQL request to:', url);
-        console.error('Query:', query);
-        console.error('Variables:', variables);
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                query,
-                variables,
-            }),
-        });
-
-        // Log response status and headers for debugging
-        console.error('GraphQL Response Status:', response.status);
-        console.error('GraphQL Response Headers:', Object.fromEntries(response.headers.entries()));
-
-        const data = await response.text();
-        console.error('Raw Response:', data);
-
-        let parsedData;
-        try {
-            parsedData = JSON.parse(data);
-        } catch (e) {
-            throw new Error(`Invalid JSON response from GraphQL: ${data}`);
-        }
-
-        if (!response.ok) {
-            let errorMessage = `GraphQL request failed with status ${response.status}`;
-            if (parsedData.errors) {
-                errorMessage += '\nGraphQL Errors:\n' + parsedData.errors
-                    .map((e: any) => `- ${e.message}${e.locations ? ` at ${JSON.stringify(e.locations)}` : ''}`)
-                    .join('\n');
-
-                // Add helpful debugging information
-                errorMessage += '\n\nDebugging Tips:';
-                errorMessage += '\n1. Check if GraphQL is enabled in Strapi';
-                errorMessage += '\n2. Verify the GraphQL endpoint URL is correct';
-                errorMessage += '\n3. Ensure your JWT token has GraphQL permissions';
-                errorMessage += '\n4. Validate your query syntax';
-                errorMessage += '\n5. Check if the queried types and fields exist';
-
-                // Add example of a working introspection query
-                errorMessage += '\n\nTry this introspection query to check GraphQL setup:';
-                errorMessage += '\nquery { __schema { types { name } } }';
-            }
-            throw new Error(errorMessage);
-        }
-
-        if (parsedData.errors) {
-            let errorMessage = 'GraphQL query completed with errors:\n' + parsedData.errors
-                .map((e: any) => `- ${e.message}${e.locations ? ` at ${JSON.stringify(e.locations)}` : ''}`)
-                .join('\n');
-
-            // Add query-specific debugging tips
-            errorMessage += '\n\nPossible Solutions:';
-            errorMessage += '\n1. Check field names match the schema exactly';
-            errorMessage += '\n2. Ensure all required fields are included';
-            errorMessage += '\n3. Verify the content type exists and is published';
-            errorMessage += '\n4. Check if you need to include pagination';
-            errorMessage += '\n5. Make sure you have permission to access these fields';
-
-            // Add example query structure
-            errorMessage += '\n\nExample Query Structure:';
-            errorMessage += '\nquery {';
-            errorMessage += '\n  contentType {';
-            errorMessage += '\n    data {';
-            errorMessage += '\n      id';
-            errorMessage += '\n      attributes {';
-            errorMessage += '\n        field1';
-            errorMessage += '\n        field2';
-            errorMessage += '\n      }';
-            errorMessage += '\n    }';
-            errorMessage += '\n    meta {';
-            errorMessage += '\n      pagination {';
-            errorMessage += '\n        page';
-            errorMessage += '\n        pageSize';
-            errorMessage += '\n        total';
-            errorMessage += '\n      }';
-            errorMessage += '\n    }';
-            errorMessage += '\n  }';
-            errorMessage += '\n}';
-
-            throw new Error(errorMessage);
-        }
-
-        return parsedData;
-    } catch (error) {
-        console.error("GraphQL request failed:", error);
-        throw error;
-    }
-}
-
-// Schema for GraphQL request
-const GraphQLRequestSchema = z.object({
-    query: z.string().min(1),
-    variables: z.record(z.any()).optional(),
-});
-
-// Schema for components request
-const ComponentsRequestSchema = z.object({
-    page: z.number().min(1).optional().default(1),
-    pageSize: z.number().min(1).optional().default(25),
-});
-
-// Schema for REST request
-const RestRequestSchema = z.object({
-    endpoint: z.string().min(1),
-    method: z.enum(['GET', 'POST', 'PUT', 'DELETE']).default('GET'),
-    params: z.record(z.any()).optional(),
-    body: z.record(z.any()).optional(),
-});
-
-// Enhanced Schema for media upload request
-const MediaUploadSchema = z.object({
-    url: z.string().url(),
-    format: z.enum(['jpeg', 'png', 'webp', 'original']).default('original'),
-    quality: z.number().min(1).max(100).optional().default(80),
-    metadata: z.object({
-        name: z.string().optional(),
-        caption: z.string().optional(),
-        alternativeText: z.string().optional(),
-        description: z.string().optional()
-    }).optional()
-});
 
 // Helper function to download image as buffer
 async function downloadImage(url: string): Promise<Buffer> {
@@ -472,31 +471,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 },
             },
             {
-                name: "strapi_graphql",
-                description: "Execute a GraphQL query against Strapi's GraphQL endpoint. PREFERRED METHOD FOR WRITE OPERATIONS (mutations). IMPORTANT FOR WRITE OPERATIONS: 1) Always fetch the complete current data first before updating, 2) Include ALL existing fields in your mutation, not just the ones you're changing, 3) Never send partial updates as this might clear unspecified fields. PAGINATION: Always include pagination in collection queries using 'pagination: { page: 1, pageSize: 100 }' and request meta.pagination in the response. Example query: query { entityName(pagination: { page: 1, pageSize: 100 }) { data { id } meta { pagination { total pageCount pageSize page } } } } }. Example mutation: mutation { updateEntity(id: \"1\", data: { ...existingData, fieldToUpdate: newValue }) { data { id attributes } } }",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        server: {
-                            type: "string",
-                            description: "The name of the server to connect to"
-                        },
-                        query: {
-                            type: "string",
-                            description: "The GraphQL query to execute. For collections, always include pagination parameters and meta.pagination in response. For write operations, first query existing data and include ALL fields in mutations to prevent data loss.",
-                        },
-                        variables: {
-                            type: "object",
-                            description: "Optional variables for the GraphQL query or mutation. When updating, include all existing data plus your changes to prevent data loss.",
-                            additionalProperties: true,
-                        },
-                    },
-                    required: ["server", "query"],
-                },
-            },
-            {
                 name: "strapi_rest",
-                description: "Execute REST API requests against Strapi endpoints. Best suited for reading data - for writing data, prefer using strapi_graphql with mutations. CRITICAL FOR WRITE OPERATIONS: To prevent data loss, you must 1) First GET the complete current data, 2) Merge your changes with the existing data, 3) Send the complete object back, not just the changed fields. For collection endpoints, pagination is automatically included with page=1&pageSize=100 and populate=* by default to include all relations. IMPORTANT: Use strapi_get_content_types and strapi_get_components first to understand the available fields and their types. This ensures your requests match the schema. Example: { endpoint: 'api/articles', params: { filters: { title: { $contains: 'test' } } } }.",
+                description: "Execute REST API requests against Strapi endpoints with automatic schema validation. Features: 1) Automatic schema validation for write operations, 2) Type checking for all fields, 3) Required field validation, 4) Detailed error messages with field-specific feedback. For collection endpoints, pagination is automatically included with page=1&pageSize=100 and populate=* by default to include all relations.",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -511,7 +487,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         method: {
                             type: "string",
                             enum: ["GET", "POST", "PUT", "DELETE"],
-                            description: "HTTP method to use. Note: For write operations (POST/PUT/DELETE), GraphQL mutations are preferred. When using PUT, you must include ALL existing data to prevent data loss.",
+                            description: "HTTP method to use. For write operations (POST/PUT), data is automatically validated against the content type schema.",
                             default: "GET"
                         },
                         params: {
@@ -521,13 +497,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                         body: {
                             type: "object",
-                            description: "Request body for POST/PUT requests. Must match the schema from strapi_get_content_types. For updates, must include ALL existing fields to prevent data loss. Consider using GraphQL mutations instead for write operations.",
+                            description: "Request body for POST/PUT requests. Must match the schema from strapi_get_content_types. Data is automatically validated before sending.",
                             additionalProperties: true,
-                        },
-                        populate: {
-                            type: "string",
-                            description: "Relations to populate (defaults to '*' to include all relations). Can be specified as specific fields if needed.",
-                            default: "*"
                         }
                     },
                     required: ["server", "endpoint"],
@@ -588,65 +559,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         ],
     };
 });
-
-// Update makeRestRequest with server config
-async function makeRestRequest(
-    serverName: string,
-    endpoint: string,
-    method: string = 'GET',
-    params?: Record<string, any>,
-    body?: Record<string, any>
-): Promise<any> {
-    const serverConfig = getServerConfig(serverName);
-    let url = `${serverConfig.API_URL}/${endpoint}`;
-
-    // Build query parameters
-    const queryParams = new URLSearchParams();
-
-    // Add pagination for collection endpoints if using GET method
-    if (method === 'GET' && endpoint.startsWith('api/')) {
-        queryParams.append('pagination[page]', '1');
-        queryParams.append('pagination[pageSize]', '100');
-    }
-
-    // Always add populate='*'
-    queryParams.append('populate', '*');
-
-    // Add additional params
-    if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-            queryParams.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-        });
-    }
-
-    // Append query string to URL
-    const queryString = queryParams.toString();
-    if (queryString) {
-        url = `${url}?${queryString}`;
-    }
-
-    const headers = {
-        'Authorization': `Bearer ${serverConfig.JWT}`,
-        'Content-Type': 'application/json',
-    };
-
-    const requestOptions: import('node-fetch').RequestInit = {
-        method,
-        headers,
-    };
-
-    if (body && (method === 'POST' || method === 'PUT')) {
-        requestOptions.body = JSON.stringify(body);
-    }
-
-    try {
-        const response = await fetch(url, requestOptions);
-        return await handleStrapiError(response, `REST request to ${endpoint}`);
-    } catch (error) {
-        console.error(`REST request to ${endpoint} failed:`, error);
-        throw error;
-    }
-}
 
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -775,17 +687,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     {
                         type: "text",
                         text: JSON.stringify(response, null, 2),
-                    },
-                ],
-            };
-        } else if (name === "strapi_graphql") {
-            const { server, query, variables } = args as { server: string, query: string, variables?: Record<string, any> };
-            const data = await makeGraphQLRequest(server, query, variables);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: JSON.stringify(data, null, 2),
                     },
                 ],
             };

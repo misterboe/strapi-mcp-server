@@ -10,10 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 - **Server Configuration**: Changed from environment variables to config file
+
   - Now requires a configuration file at `~/.mcp/strapi-mcp-server.config.json`
   - Supports multiple server configurations
   - Old method using `API_URL` and `JWT` environment variables no longer works
   - All API calls now require a `server` parameter to specify which server to use
+
+- **Removed GraphQL Support**: Removed all GraphQL functionality to simplify the codebase
+
+  - Removed `strapi_graphql` command
+  - All write operations should now use REST API
+  - Better error handling and validation in REST endpoints
+
+- **Enhanced REST API**:
+  - Improved validation for write operations
+  - Added automatic schema validation
+  - Better error messages with field-specific feedback
+  - Automatic data validation against content type schema
 
 ### Added
 
@@ -21,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `strapi_list_servers` command to show available servers
 - Better error messages with configuration help
 - Server-specific configuration validation
+- Improved REST validation helpers
+- Schema-based request validation
+- Field-level error reporting
+- Automatic data type checking
 
 ### Changed
 
@@ -28,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration structure moved to JSON file
 - Improved error messages with setup instructions
 - Updated documentation for multi-server setup
+
+### Removed
+
+- Environment variables configuration method
+- All GraphQL related functionality
+- GraphQL mutation support
+- GraphQL query builder
 
 ### Migration Guide
 
@@ -68,8 +92,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    ```
 
 5. Secure your configuration file:
+
    ```bash
    chmod 600 ~/.mcp/strapi-mcp-server.config.json
+   ```
+
+6. Update GraphQL operations to REST:
+
+   For creating content:
+
+   ```javascript
+   strapi_rest({
+     server: "myserver",
+     endpoint: "api/articles",
+     method: "POST",
+     body: {
+       data: {
+         title: "My Article",
+         content: "Content here",
+       },
+     },
+   });
+   ```
+
+   For updating content:
+
+   ```javascript
+   strapi_rest({
+     server: "myserver",
+     endpoint: "api/articles/123",
+     method: "PUT",
+     body: {
+       data: {
+         title: "Updated Title",
+         content: "Updated content",
+       },
+     },
+   });
    ```
 
 ## [1.0.1]
@@ -85,7 +144,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 - Basic Strapi CMS integration
 - REST API support
-- GraphQL support
 - Media upload handling
 - JWT authentication
 - Content type management
