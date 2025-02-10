@@ -13,20 +13,21 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import sharp from 'sharp';
 import { CONNECT_TO_STRAPI_CONTENT } from './promts/connect.js';
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
-// Validate required environment variables
-const requiredEnvVars = ['API_URL', 'JWT'] as const;
-for (const envVar of requiredEnvVars) {
-    if (!process.env[envVar]) {
-        throw new Error(`Missing required environment variable: ${envVar}`);
-    }
+// Read config file
+const CONFIG_PATH = join(homedir(), '.mcp', 'strapi-mcp-server.config.json');
+let config: Record<string, { api_url: string, api_key: string }>;
+
+try {
+    const configContent = readFileSync(CONFIG_PATH, 'utf-8');
+    config = JSON.parse(configContent);
+} catch (error) {
+    console.error('Error reading config file:', error);
+    config = {};
 }
-
-// Strapi Configuration from environment variables
-const STRAPI_CONFIG = {
-    API_URL: process.env.API_URL!,
-    JWT: process.env.JWT!
-} as const;
 
 // Create server instance
 const server = new Server(
@@ -41,6 +42,18 @@ const server = new Server(
         },
     }
 );
+
+// Helper function to get server config
+function getServerConfig(serverName: string): { API_URL: string, JWT: string } {
+    const serverConfig = config[serverName];
+    if (!serverConfig) {
+        throw new Error(`Server "${serverName}" not found in config. Available servers: ${Object.keys(config).join(', ')}`);
+    }
+    return {
+        API_URL: serverConfig.api_url,
+        JWT: serverConfig.api_key
+    };
+}
 
 // Define prompt types
 interface PromptArgument {
@@ -96,15 +109,16 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 });
 
 // Helper function for making Strapi API requests
-async function makeStrapiRequest(endpoint: string, params?: Record<string, string>): Promise<any> {
-    let url = `${STRAPI_CONFIG.API_URL}${endpoint}`;
+async function makeStrapiRequest(serverName: string, endpoint: string, params?: Record<string, string>): Promise<any> {
+    const serverConfig = getServerConfig(serverName);
+    let url = `${serverConfig.API_URL}${endpoint}`;
     if (params) {
         const queryString = new URLSearchParams(params).toString();
         url = `${url}?${queryString}`;
     }
 
     const headers = {
-        'Authorization': `Bearer ${STRAPI_CONFIG.JWT}`,
+        'Authorization': `Bearer ${serverConfig.JWT}`,
         'Content-Type': 'application/json',
     };
 
@@ -162,11 +176,12 @@ async function handleStrapiError(response: import('node-fetch').Response, contex
     return response.json();
 }
 
-// Update makeGraphQLRequest with better error handling and debugging
-async function makeGraphQLRequest(query: string, variables?: Record<string, any>): Promise<any> {
-    const url = `${STRAPI_CONFIG.API_URL}/graphql`;
+// Update makeGraphQLRequest with server config
+async function makeGraphQLRequest(serverName: string, query: string, variables?: Record<string, any>): Promise<any> {
+    const serverConfig = getServerConfig(serverName);
+    const url = `${serverConfig.API_URL}/graphql`;
     const headers = {
-        'Authorization': `Bearer ${STRAPI_CONFIG.JWT}`,
+        'Authorization': `Bearer ${serverConfig.JWT}`,
         'Content-Type': 'application/json',
     };
 
@@ -330,8 +345,9 @@ async function processImage(buffer: Buffer, format: string, quality: number): Pr
     return sharpInstance.toBuffer();
 }
 
-// Helper function for media upload
-async function uploadMedia(imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>): Promise<any> {
+// Update uploadMedia with server config
+async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>): Promise<any> {
+    const serverConfig = getServerConfig(serverName);
     const formData = new FormData();
 
     // Update filename extension if format is changed
@@ -350,11 +366,11 @@ async function uploadMedia(imageBuffer: Buffer, fileName: string, format: string
         formData.append('fileInfo', JSON.stringify(metadata));
     }
 
-    const url = `${STRAPI_CONFIG.API_URL}/api/upload`;
+    const url = `${serverConfig.API_URL}/api/upload`;
     const response = await fetch(url, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${STRAPI_CONFIG.JWT}`,
+            'Authorization': `Bearer ${serverConfig.JWT}`,
             ...formData.getHeaders()
         },
         body: formData
@@ -368,12 +384,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
         tools: [
             {
-                name: "strapi_get_content_types",
-                description: "Get all content types from Strapi. Returns the complete schema of all content types.",
+                name: "strapi_list_servers",
+                description: "List all available Strapi servers from the configuration.",
                 inputSchema: {
                     type: "object",
                     properties: {},
                     required: [],
+                },
+            },
+            {
+                name: "strapi_get_content_types",
+                description: "Get all content types from Strapi. Returns the complete schema of all content types.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        server: {
+                            type: "string",
+                            description: "The name of the server to connect to"
+                        }
+                    },
+                    required: ["server"],
                 },
             },
             {
@@ -382,6 +412,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: "object",
                     properties: {
+                        server: {
+                            type: "string",
+                            description: "The name of the server to connect to"
+                        },
                         page: {
                             type: "number",
                             description: "Page number (starts at 1)",
@@ -395,6 +429,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             default: 25
                         },
                     },
+                    required: ["server"],
                 },
             },
             {
@@ -403,6 +438,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: "object",
                     properties: {
+                        server: {
+                            type: "string",
+                            description: "The name of the server to connect to"
+                        },
                         query: {
                             type: "string",
                             description: "The GraphQL query to execute. For collections, always include pagination parameters and meta.pagination in response. For write operations, first query existing data and include ALL fields in mutations to prevent data loss.",
@@ -413,7 +452,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             additionalProperties: true,
                         },
                     },
-                    required: ["query"],
+                    required: ["server", "query"],
                 },
             },
             {
@@ -422,6 +461,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: "object",
                     properties: {
+                        server: {
+                            type: "string",
+                            description: "The name of the server to connect to"
+                        },
                         endpoint: {
                             type: "string",
                             description: "The API endpoint (e.g., 'api/articles'). Check strapi_get_content_types first to see available endpoints.",
@@ -448,7 +491,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             default: "*"
                         }
                     },
-                    required: ["endpoint"],
+                    required: ["server", "endpoint"],
                 },
             },
             {
@@ -457,6 +500,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: {
                     type: "object",
                     properties: {
+                        server: {
+                            type: "string",
+                            description: "The name of the server to connect to"
+                        },
                         url: {
                             type: "string",
                             description: "URL of the image to upload"
@@ -496,21 +543,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             }
                         }
                     },
-                    required: ["url"]
+                    required: ["server", "url"]
                 }
             }
         ],
     };
 });
 
-// Update makeRestRequest with proper node-fetch types
+// Update makeRestRequest with server config
 async function makeRestRequest(
+    serverName: string,
     endpoint: string,
     method: string = 'GET',
     params?: Record<string, any>,
     body?: Record<string, any>
 ): Promise<any> {
-    let url = `${STRAPI_CONFIG.API_URL}/${endpoint}`;
+    const serverConfig = getServerConfig(serverName);
+    let url = `${serverConfig.API_URL}/${endpoint}`;
 
     // Build query parameters
     const queryParams = new URLSearchParams();
@@ -538,7 +587,7 @@ async function makeRestRequest(
     }
 
     const headers = {
-        'Authorization': `Bearer ${STRAPI_CONFIG.JWT}`,
+        'Authorization': `Bearer ${serverConfig.JWT}`,
         'Content-Type': 'application/json',
     };
 
@@ -565,8 +614,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     try {
-        if (name === "strapi_get_content_types") {
-            const data = await makeStrapiRequest("/api/content-type-builder/content-types");
+        if (name === "strapi_list_servers") {
+            const servers = Object.keys(config).map(serverName => ({
+                name: serverName,
+                api_url: config[serverName].api_url
+            }));
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({ servers }, null, 2),
+                    },
+                ],
+            };
+        } else if (name === "strapi_get_content_types") {
+            const { server } = args as { server: string };
+            const data = await makeStrapiRequest(server, "/api/content-type-builder/content-types");
 
             // Add helpful usage information to the response
             const response = {
@@ -612,13 +676,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_get_components") {
-            const { page, pageSize } = ComponentsRequestSchema.parse(args || {});
+            const { server, page, pageSize } = args as { server: string, page: number, pageSize: number };
             const params = {
                 'pagination[page]': page.toString(),
                 'pagination[pageSize]': pageSize.toString(),
             };
 
-            const data = await makeStrapiRequest("/api/content-type-builder/components", params);
+            const data = await makeStrapiRequest(server, "/api/content-type-builder/components", params);
 
             // Add pagination metadata to the response
             const response = {
@@ -640,8 +704,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_graphql") {
-            const { query, variables } = GraphQLRequestSchema.parse(args);
-            const data = await makeGraphQLRequest(query, variables);
+            const { server, query, variables } = args as { server: string, query: string, variables?: Record<string, any> };
+            const data = await makeGraphQLRequest(server, query, variables);
             return {
                 content: [
                     {
@@ -651,8 +715,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_rest") {
-            const { endpoint, method, params, body } = RestRequestSchema.parse(args);
-            const data = await makeRestRequest(endpoint, method, params, body);
+            const { server, endpoint, method, params, body } = args as { server: string, endpoint: string, method: string, params?: Record<string, any>, body?: Record<string, any> };
+            const data = await makeRestRequest(server, endpoint, method, params, body);
             return {
                 content: [
                     {
@@ -662,7 +726,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_upload_media") {
-            const { url, format, quality, metadata } = MediaUploadSchema.parse(args);
+            const { server, url, format, quality, metadata } = args as { server: string, url: string, format: string, quality: number, metadata?: Record<string, any> };
 
             // Extract filename from URL
             const fileName = url.split('/').pop() || 'image';
@@ -674,7 +738,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const processedBuffer = await processImage(imageBuffer, format, quality);
 
             // Upload to Strapi with metadata
-            const data = await uploadMedia(processedBuffer, fileName, format, metadata);
+            const data = await uploadMedia(server, processedBuffer, fileName, format, metadata);
 
             // Format response with helpful usage information
             const response = {
