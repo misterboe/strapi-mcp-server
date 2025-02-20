@@ -91,7 +91,6 @@ strapi_rest({
         $contains: "search term",
       },
     },
-    populate: "*",
   },
 });
 
@@ -153,7 +152,7 @@ strapi_upload_media({
 2. Use proper plural/singular forms for endpoints
 3. Include error handling in your queries
 4. Validate URLs before upload
-5. Use appropriate content population strategies
+5. Start with minimal queries and add population only when needed
 6. Always include the complete data object when updating
 7. Use filters to optimize query performance
 8. Leverage built-in schema validation
@@ -209,17 +208,20 @@ params: {
 ### Population
 
 ```javascript
-// Populate all relations
+// Basic request without population
 params: {
-  populate: "*"
 }
 
-// Populate specific fields
+// Selective population when needed
+params: {
+  populate: ["category"];
+}
+
+// Detailed population with field selection
 params: {
   populate: {
-    category: true,
-    author: {
-      fields: ["name", "email"]
+    category: {
+      fields: ["name", "slug"];
     }
   }
 }

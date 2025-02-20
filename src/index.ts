@@ -16,6 +16,7 @@ import { CONNECT_TO_STRAPI_CONTENT } from './promts/connect.js';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import qs from 'qs';
 
 // Read config file
 const CONFIG_PATH = join(homedir(), '.mcp', 'strapi-mcp-server.config.json');
@@ -266,27 +267,14 @@ async function makeRestRequest(
         }
     }
 
-    // Build query parameters
-    const queryParams = new URLSearchParams();
-
-    // Add pagination for collection endpoints if using GET method
-    if (method === 'GET' && endpoint.startsWith('api/')) {
-        queryParams.append('pagination[page]', '1');
-        queryParams.append('pagination[pageSize]', '100');
-        queryParams.append('populate', '*');
-    }
-
-    // Add additional params
+    // Parse query parameters if provided
     if (params) {
-        Object.entries(params).forEach(([key, value]) => {
-            queryParams.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+        const queryString = qs.stringify(params, {
+            encodeValuesOnly: true
         });
-    }
-
-    // Append query string to URL
-    const queryString = queryParams.toString();
-    if (queryString) {
-        url = `${url}?${queryString}`;
+        if (queryString) {
+            url = `${url}?${queryString}`;
+        }
     }
 
     const headers = {
@@ -472,7 +460,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "strapi_rest",
-                description: "Execute REST API requests against Strapi endpoints with automatic schema validation. Features: 1) Automatic schema validation for write operations, 2) Type checking for all fields, 3) Required field validation, 4) Detailed error messages with field-specific feedback. For collection endpoints, pagination is automatically included with page=1&pageSize=100 and populate=* by default to include all relations.",
+                description: "Execute REST API requests against Strapi endpoints. All query parameters are optional. Start with basic requests and add parameters only when needed.\n\n" +
+                    "Basic usage without params:\n" +
+                    "endpoint: 'api/articles'\n\n" +
+                    "Optional parameters examples:\n" +
+                    "1. Field selection (recommended):\n" +
+                    "params: { fields: ['title', 'content'] }\n\n" +
+                    "2. Selective populate:\n" +
+                    "params: { populate: ['category'] }\n\n" +
+                    "3. Detailed populate:\n" +
+                    "params: { populate: { category: { fields: ['name'] } } }\n\n" +
+                    "4. Sorting and Pagination:\n" +
+                    "params: { sort: ['publishedAt:desc'], pagination: { page: 1, pageSize: 10 } }\n\n" +
+                    "5. Filters:\n" +
+                    "params: { filters: { category: { $eq: 'news' } } }",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -482,23 +483,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                         endpoint: {
                             type: "string",
-                            description: "The API endpoint (e.g., 'api/articles'). Check strapi_get_content_types first to see available endpoints.",
+                            description: "The API endpoint (e.g., 'api/articles')"
                         },
                         method: {
                             type: "string",
                             enum: ["GET", "POST", "PUT", "DELETE"],
-                            description: "HTTP method to use. For write operations (POST/PUT), data is automatically validated against the content type schema.",
+                            description: "HTTP method to use",
                             default: "GET"
                         },
                         params: {
                             type: "object",
-                            description: "Query parameters (filters, sort, etc.). Use schema from strapi_get_content_types to determine valid fields.",
+                            description: "Optional query parameters. Start with a simple request without params and add them as needed. Supports: fields, filters, populate, sort, pagination, etc.",
                             additionalProperties: true,
+                            required: false
                         },
                         body: {
                             type: "object",
-                            description: "Request body for POST/PUT requests. Must match the schema from strapi_get_content_types. Data is automatically validated before sending.",
+                            description: "Optional request body for POST/PUT requests",
                             additionalProperties: true,
+                            required: false
                         }
                     },
                     required: ["server", "endpoint"],
