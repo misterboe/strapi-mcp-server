@@ -171,175 +171,6 @@ async function makeStrapiRequest(serverName: string, endpoint: string, params?: 
     }
 }
 
-// Cache for content type schemas
-let contentTypeSchemas: Record<string, any> = {};
-
-// Schema validation helper
-async function validateAgainstSchema(serverName: string, endpoint: string, data: any): Promise<{ isValid: boolean; errors: string[] }> {
-    // Extract content type from endpoint (e.g., "api/articles" -> "articles")
-    const contentType = endpoint.replace(/^api\//, '').split('/')[0];
-
-    // Get or fetch schema
-    if (!contentTypeSchemas[contentType]) {
-        try {
-            const schema = await makeStrapiRequest(serverName, "/api/content-type-builder/content-types");
-            const typeSchema = schema.data.find((type: any) => type.schema.pluralName === contentType);
-            if (typeSchema) {
-                contentTypeSchemas[contentType] = typeSchema.schema;
-            }
-        } catch (error) {
-            console.error(`Failed to fetch schema for ${contentType}:`, error);
-            return { isValid: true, errors: [] }; // Fail open if we can't fetch schema
-        }
-    }
-
-    const schema = contentTypeSchemas[contentType];
-    if (!schema) {
-        return { isValid: true, errors: [] }; // Fail open if no schema found
-    }
-
-    const errors: string[] = [];
-
-    // Validate required fields
-    schema.attributes.forEach((attr: any) => {
-        if (attr.required && !data[attr.name]) {
-            errors.push(`Missing required field: ${attr.name}`);
-        }
-
-        if (data[attr.name]) {
-            // Type validation
-            switch (attr.type) {
-                case 'string':
-                    if (typeof data[attr.name] !== 'string') {
-                        errors.push(`Field ${attr.name} must be a string`);
-                    }
-                    break;
-                case 'integer':
-                case 'biginteger':
-                    if (!Number.isInteger(data[attr.name])) {
-                        errors.push(`Field ${attr.name} must be an integer`);
-                    }
-                    break;
-                case 'float':
-                case 'decimal':
-                    if (typeof data[attr.name] !== 'number') {
-                        errors.push(`Field ${attr.name} must be a number`);
-                    }
-                    break;
-                case 'boolean':
-                    if (typeof data[attr.name] !== 'boolean') {
-                        errors.push(`Field ${attr.name} must be a boolean`);
-                    }
-                    break;
-                case 'date':
-                case 'datetime':
-                    if (isNaN(Date.parse(data[attr.name]))) {
-                        errors.push(`Field ${attr.name} must be a valid date`);
-                    }
-                    break;
-                // Add more type validations as needed
-            }
-        }
-    });
-
-    return {
-        isValid: errors.length === 0,
-        errors
-    };
-}
-
-// Enhanced REST request function with validation
-async function makeRestRequest(
-    serverName: string,
-    endpoint: string,
-    method: string = 'GET',
-    params?: Record<string, any>,
-    body?: Record<string, any>
-): Promise<any> {
-    const serverConfig = getServerConfig(serverName);
-    let url = `${serverConfig.API_URL}/${endpoint}`;
-
-    // Validate data against schema for write operations
-    if (body?.data && (method === 'POST' || method === 'PUT')) {
-        const validation = await validateAgainstSchema(serverName, endpoint, body.data);
-        if (!validation.isValid) {
-            throw new Error(`Validation failed:\n${validation.errors.join('\n')}`);
-        }
-    }
-
-    // Parse query parameters if provided
-    if (params) {
-        const queryString = qs.stringify(params, {
-            encodeValuesOnly: true
-        });
-        if (queryString) {
-            url = `${url}?${queryString}`;
-        }
-    }
-
-    const headers = {
-        'Authorization': `Bearer ${serverConfig.JWT}`,
-        'Content-Type': 'application/json',
-    };
-
-    const requestOptions: import('node-fetch').RequestInit = {
-        method,
-        headers,
-    };
-
-    if (body && (method === 'POST' || method === 'PUT')) {
-        requestOptions.body = JSON.stringify(body);
-    }
-
-    try {
-        const response = await fetch(url, requestOptions);
-        return await handleStrapiError(response, `REST request to ${endpoint}`);
-    } catch (error) {
-        console.error(`REST request to ${endpoint} failed:`, error);
-        throw error;
-    }
-}
-
-// Update handleStrapiError with better component-related error messages
-async function handleStrapiError(response: import('node-fetch').Response, context: string): Promise<any> {
-    if (!response.ok) {
-        let errorMessage = `${context} failed with status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            if (errorData.error) {
-                errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
-
-                // Enhanced error messages
-                if (response.status === 400) {
-                    errorMessage += "\nValidation Errors:\n";
-                    if (errorData.error.details?.errors) {
-                        errorMessage += errorData.error.details.errors
-                            .map((err: any) => `- ${err.path.join('.')}: ${err.message}`)
-                            .join('\n');
-                    }
-                    errorMessage += "\n\nHINT: For components, check:\n" +
-                        "1. Component structure is correct (single vs repeatable)\n" +
-                        "2. All required fields are provided\n" +
-                        "3. Field types match the schema\n" +
-                        "4. Component name matches exactly\n" +
-                        "5. Use populate parameter to read components first";
-                } else if (response.status === 404) {
-                    errorMessage += "\nHINT: Check:\n" +
-                        "1. The endpoint path is correct\n" +
-                        "2. The content type exists\n" +
-                        "3. The ID exists\n" +
-                        "4. Component names are correct\n" +
-                        "5. You're using the correct plural/singular form";
-                }
-            }
-        } catch {
-            errorMessage += ` - ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-    }
-    return response.json();
-}
-
 // Helper function to download image as buffer
 async function downloadImage(url: string): Promise<Buffer> {
     const response = await fetch(url);
@@ -779,6 +610,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 });
+
+// Enhanced REST request function
+async function makeRestRequest(
+    serverName: string,
+    endpoint: string,
+    method: string = 'GET',
+    params?: Record<string, any>,
+    body?: Record<string, any>
+): Promise<any> {
+    const serverConfig = getServerConfig(serverName);
+    let url = `${serverConfig.API_URL}/${endpoint}`;
+
+    // Parse query parameters if provided
+    if (params) {
+        const queryString = qs.stringify(params, {
+            encodeValuesOnly: true
+        });
+        if (queryString) {
+            url = `${url}?${queryString}`;
+        }
+    }
+
+    const headers = {
+        'Authorization': `Bearer ${serverConfig.JWT}`,
+        'Content-Type': 'application/json',
+    };
+
+    const requestOptions: import('node-fetch').RequestInit = {
+        method,
+        headers,
+    };
+
+    if (body && (method === 'POST' || method === 'PUT')) {
+        requestOptions.body = JSON.stringify(body);
+    }
+
+    try {
+        const response = await fetch(url, requestOptions);
+        return await handleStrapiError(response, `REST request to ${endpoint}`);
+    } catch (error) {
+        console.error(`REST request to ${endpoint} failed:`, error);
+        throw error;
+    }
+}
+
+// Update error handler to be more generic and helpful
+async function handleStrapiError(response: import('node-fetch').Response, context: string): Promise<any> {
+    if (!response.ok) {
+        let errorMessage = `${context} failed with status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            if (errorData.error) {
+                errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
+
+                // Add helpful hints based on status
+                if (response.status === 400) {
+                    errorMessage += "\nHINT: Check the request structure matches Strapi's expectations. For v4/v5 differences, refer to Strapi's migration guide.";
+                } else if (response.status === 404) {
+                    errorMessage += "\nHINT: Check the endpoint path and ID are correct.";
+                }
+            }
+        } catch {
+            errorMessage += ` - ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+    }
+    return response.json();
+}
 
 // Start the server
 async function main() {
