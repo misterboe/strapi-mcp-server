@@ -502,7 +502,7 @@ async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: st
     return handleStrapiError(response, 'Media upload');
 }
 
-// List available tools
+// List available tools 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
         tools: [
@@ -741,7 +741,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             servers,
                             config_path: CONFIG_PATH,
                             help: "To add more servers, edit the configuration file at the path shown above.",
-                            version_differences: STRAPI_VERSION_DIFFERENCES
+                            version_differences: STRAPI_VERSION_DIFFERENCES,
+                            user_action_required: {
+                                message: "Please specify which server you want to work with by providing the server name in your next command.",
+                                example: "For example: 'I want to work with the server \"myserver\"' or 'Use server \"myserver\" for the next operations'",
+                                available_servers: servers.map(s => s.name),
+                                warning: "Only use servers that are listed in available_servers. Do not attempt to access servers that are not properly configured."
+                            },
+                            security: {
+                                note: "For security reasons, only servers listed in the configuration file can be accessed.",
+                                requirement: "Each server must be properly configured with valid credentials before use."
+                            }
                         }, null, 2),
                     },
                 ],

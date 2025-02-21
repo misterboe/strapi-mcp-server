@@ -13,8 +13,10 @@
     ],
     "scripts": {
         "build": "tsc && chmod +x build/index.js",
+        "build:watch": "tsc --watch",
         "start": "node build/index.js",
         "dev": "ts-node src/index.ts",
+        "dev:watch": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
         "prepublishOnly": "npm run build"
     },
     "publishConfig": {
@@ -30,6 +32,7 @@
     "license": "MIT",
     "devDependencies": {
         "@types/node": "^20.17.10",
+        "nodemon": "^3.0.3",
         "ts-node": "^10.9.1",
         "typescript": "^5.7.2"
     },
