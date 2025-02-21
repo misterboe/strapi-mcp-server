@@ -4,6 +4,16 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
 
 ## Changelog
 
+### Version 2.2.0 - Security & Version Handling Update
+
+- 🔒 Added strict write protection policy
+- 🔄 Enhanced version format support (5.\*, 4.1.5, v4, etc.)
+- 📚 Integrated documentation into server capabilities
+- 🚫 Removed connect prompt (now in capabilities)
+- ⚡ Improved error handling and validation
+- 🔍 Added version-specific differences guide
+- 📋 Enhanced server capabilities documentation
+
 ### Version 2.1.0
 
 - Improved compatibility with both Strapi v4 and v5
@@ -22,6 +32,9 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
 - 🖼️ Image processing with format conversion
 - 🌐 Multiple server support
 - ✅ Automatic schema validation
+- 🔒 Write protection policy
+- 📚 Integrated documentation
+- 🔄 Version compatibility management
 
 ## Installation
 
@@ -50,12 +63,23 @@ Create a configuration file at `~/.mcp/strapi-mcp-server.config.json`:
 {
   "myserver": {
     "api_url": "http://localhost:1337",
-    "api_key": "your-jwt-token-from-strapi-admin"
+    "api_key": "your-jwt-token-from-strapi-admin",
+    "version": "5.*" // Optional: Specify Strapi version (e.g., "5.*", "4.1.5", "v4")
   }
 }
 ```
 
 You can configure multiple Strapi instances by adding them to this file.
+
+### Version Configuration
+
+The server now supports various version formats:
+
+- Wildcard: "5._", "4._"
+- Specific: "4.1.5", "5.0.0"
+- Simple: "v4", "v5"
+
+This helps the server provide version-specific guidance and handle API differences appropriately.
 
 ### Getting a JWT Token
 
@@ -69,6 +93,7 @@ You can configure multiple Strapi instances by adding them to this file.
 
 ```javascript
 strapi_list_servers();
+// Now includes version information and differences between v4 and v5
 ```
 
 ### Content Types
@@ -79,15 +104,17 @@ strapi_get_content_types({
   server: "myserver",
 });
 
-// Get components
+// Get components with pagination
 strapi_get_components({
   server: "myserver",
+  page: 1,
+  pageSize: 25,
 });
 ```
 
 ### REST API
 
-The REST API provides comprehensive CRUD operations with built-in validation:
+The REST API provides comprehensive CRUD operations with built-in validation and version-specific handling:
 
 ```javascript
 // Query content with filters
@@ -156,6 +183,41 @@ strapi_upload_media({
 });
 ```
 
+## Version Differences (v4 vs v5)
+
+Key differences between Strapi versions that the server handles automatically:
+
+### v4
+
+- Uses numeric IDs
+- Nested attribute structure
+- Data wrapper in responses
+- Traditional REST patterns
+- External i18n plugin
+
+### v5
+
+- Document-based IDs
+- Flat data structure
+- Direct attribute access
+- Enhanced JWT security
+- Integrated i18n support
+- New Document Service API
+
+## Security Features
+
+### Write Protection Policy
+
+The server implements a strict write protection policy:
+
+- All write operations require explicit authorization
+- Protected operations include:
+  - POST (Create)
+  - PUT (Update)
+  - DELETE
+  - Media Upload
+- Each operation is logged and validated
+
 ## Best Practices
 
 1. Always check schema first with `strapi_get_content_types`
@@ -166,6 +228,8 @@ strapi_upload_media({
 6. Always include the complete data object when updating
 7. Use filters to optimize query performance
 8. Leverage built-in schema validation
+9. Check version compatibility for your operations
+10. Follow the write protection policy guidelines
 
 ## REST API Tips
 
@@ -246,28 +310,29 @@ Common issues and solutions:
    - Check endpoint plural/singular form
    - Verify content type exists
    - Ensure correct API URL
+   - Check if using correct ID format (numeric vs document-based)
 
 2. Authentication Issues
 
    - Verify JWT token is valid
    - Check token permissions
-   - Ensure server is properly configured in config file
+   - Ensure token hasn't expired
 
-3. Validation Errors
+3. Version-Related Issues
 
-   - Check required fields are provided
-   - Verify data types match schema
-   - Ensure related content exists
+   - Verify version specification in config
+   - Check data structure matches version
+   - Review version differences documentation
 
-4. Configuration Issues
-   - Check if `~/.mcp/strapi-mcp-server.config.json` exists
-   - Verify server name is correct
-   - Ensure API URL and key are valid
-
-## License
-
-MIT License - see LICENSE file for details
+4. Write Protection Errors
+   - Ensure operation is authorized
+   - Check if operation is protected
+   - Verify request follows security policy
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT

@@ -1,5 +1,24 @@
 #!/usr/bin/env node
 
+/**
+ * Strapi MCP Server
+ * Version 2.2.0
+ * 
+ * Version History:
+ * 2.2.0 - Security & Version Handling Update
+ * - Added strict write protection policy
+ * - Enhanced version format support (5.*, 4.1.5, v4, etc.)
+ * - Integrated documentation into server capabilities
+ * - Removed connect prompt (now in capabilities)
+ * - Improved error handling and validation
+ * 
+ * 2.1.0 - Previous Release
+ * - Basic Strapi integration
+ * - Server configuration
+ * - Content type handling
+ * - Media upload support
+ */
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -12,15 +31,121 @@ import { z } from "zod";
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import sharp from 'sharp';
-import { CONNECT_TO_STRAPI_CONTENT } from './promts/connect.js';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import qs from 'qs';
 
+// Define version info type
+type VersionInfo = {
+    id_field: string;
+    data_structure: string;
+    attributes: string;
+    auth_pattern: string;
+    key_features: string[];
+    breaking_changes: {
+        database: string[];
+        api: string[];
+        configuration: string[];
+        plugins: string[];
+    };
+    migration_flags: {
+        rest_api: string;
+        graphql: string;
+    };
+    compatibility_notes: string[];
+};
+
+type StrapiVersionDifferences = {
+    v4: VersionInfo;
+    v5: VersionInfo;
+};
+
+// Define version differences for reference
+const STRAPI_VERSION_DIFFERENCES: StrapiVersionDifferences = {
+    "v4": {
+        "id_field": "id",
+        "data_structure": "Uses data wrapper structure",
+        "attributes": "Nested under attributes object",
+        "auth_pattern": "Classic JWT pattern",
+        "key_features": [
+            "Numeric IDs",
+            "Nested attribute structure",
+            "Data wrapper in responses",
+            "Traditional REST patterns",
+            "External i18n plugin"
+        ],
+        "breaking_changes": {
+            "database": [],
+            "api": [],
+            "configuration": [],
+            "plugins": []
+        },
+        "migration_flags": {
+            "rest_api": "N/A",
+            "graphql": "N/A"
+        },
+        "compatibility_notes": [
+            "Uses SQLite3 for SQLite support",
+            "Supports MySQL v5",
+            "Uses traditional lifecycle hooks",
+            "External i18n plugin required"
+        ]
+    },
+    "v5": {
+        "id_field": "documentId",
+        "data_structure": "Direct access without wrapper",
+        "attributes": "Direct access at root level",
+        "auth_pattern": "Enhanced JWT with improved security",
+        "key_features": [
+            "Document-based IDs",
+            "Flat data structure",
+            "Direct attribute access",
+            "Improved REST patterns",
+            "Better error handling",
+            "Integrated i18n support",
+            "New Document Service API",
+            "Enhanced database support"
+        ],
+        "breaking_changes": {
+            "database": [
+                "Only better-sqlite3 supported for SQLite",
+                "Only mysql2 supported for MySQL",
+                "MySQL v5 no longer supported",
+                "New lifecycle hooks system"
+            ],
+            "api": [
+                "New REST API response format",
+                "Updated GraphQL schema and responses",
+                "New Document Service API replaces Entity Service"
+            ],
+            "configuration": [
+                "New server configuration for env variables",
+                "Stricter custom configuration requirements"
+            ],
+            "plugins": [
+                "helper-plugin removed",
+                "i18n integrated into core"
+            ]
+        },
+        "migration_flags": {
+            "rest_api": "Set 'Strapi-Response-Format: v4' header for v4 compatibility",
+            "graphql": "Set v4CompatibilityMode: true in graphql.config for v4 compatibility"
+        },
+        "compatibility_notes": [
+            "Uses better-sqlite3 for improved SQLite support",
+            "Requires MySQL v8+ for MySQL support",
+            "New Document Service API for data operations",
+            "Built-in i18n support",
+            "New lifecycle hooks system with Document Service Middlewares",
+            "Environment variables now handled by server configuration"
+        ]
+    }
+};
+
 // Read config file
 const CONFIG_PATH = join(homedir(), '.mcp', 'strapi-mcp-server.config.json');
-let config: Record<string, { api_url: string, api_key: string }>;
+let config: Record<string, { api_url: string, api_key: string, version?: string }>;
 
 try {
     const configContent = readFileSync(CONFIG_PATH, 'utf-8');
@@ -38,12 +163,172 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "1.0.0",
+        version: "2.2.0",
     },
     {
         capabilities: {
             tools: {},
             prompts: {},
+            strapi: {
+                security: {
+                    write_protection: {
+                        policy: "STRICT_USER_AUTHORIZATION_REQUIRED",
+                        description: "No write operations without explicit user authorization",
+                        protected_operations: [
+                            "POST /api/* (Create)",
+                            "PUT /api/* (Update)",
+                            "DELETE /api/* (Delete)",
+                            "POST /api/upload (Media Upload)"
+                        ],
+                        requirements: [
+                            "Explicit user authorization for each write operation",
+                            "No automatic updates or deletions",
+                            "User confirmation for each data change",
+                            "Logging of all write operations"
+                        ],
+                        validation_steps: [
+                            "Verification of user authorization",
+                            "Validation of data to be modified",
+                            "User confirmation of operation",
+                            "Logging of changes with user reference"
+                        ]
+                    }
+                },
+                versions: STRAPI_VERSION_DIFFERENCES,
+                defaultVersion: "v5",
+                supportedVersions: ["v4", "v5"],
+                migrationGuides: {
+                    "v4_to_v5": {
+                        steps: [
+                            "Update database (better-sqlite3, mysql2)",
+                            "Replace id with documentId",
+                            "Remove data wrapper structure",
+                            "Update lifecycle hooks",
+                            "Check plugin compatibility"
+                        ],
+                        compatibilityFlags: {
+                            rest: "Strapi-Response-Format: v4",
+                            graphql: "v4CompatibilityMode: true"
+                        }
+                    }
+                },
+                documentation: {
+                    schema_conventions: {
+                        description: "Schema & naming conventions for Content Types",
+                        examples: {
+                            schema: {
+                                singularName: "article",
+                                pluralName: "articles",
+                                collectionName: "articles"
+                            },
+                            endpoints: {
+                                rest: "api/articles",
+                                graphql_collection: "query { articles }",
+                                graphql_single: "query { article }"
+                            }
+                        }
+                    },
+                    api_patterns: {
+                        rest: {
+                            collection: "GET /api/{pluralName}",
+                            single: "GET /api/{pluralName}/{id}",
+                            create: "POST /api/{pluralName}",
+                            update: "PUT /api/{pluralName}/{id}",
+                            delete: "DELETE /api/{pluralName}/{id}"
+                        },
+                        graphql: {
+                            collection: "query { pluralName(pagination: { page: 1, pageSize: 100 }) { data { id attributes } } }",
+                            single: "query { singularName(id: 1) { data { id attributes } } }",
+                            create: "mutation { createPluralName(data: { field: value }) { data { id } } }",
+                            update: "mutation { updatePluralName(id: 1, data: { field: value }) { data { id } } }"
+                        }
+                    },
+                    media_handling: {
+                        upload_steps: [
+                            "Upload via strapi_upload_media",
+                            "Provide metadata (name, caption, alternativeText)",
+                            "Choose format (jpeg, png, webp)",
+                            "Get image ID from response"
+                        ],
+                        linking_steps: [
+                            "Use PUT request",
+                            "Include complete data structure",
+                            "Use documentId for v5",
+                            "Images as array"
+                        ],
+                        example: {
+                            upload: {
+                                url: "https://example.com/image.jpg",
+                                metadata: {
+                                    name: "article-name",
+                                    caption: "Article Caption",
+                                    alternativeText: "Article Alt Text"
+                                }
+                            },
+                            link: {
+                                method: "PUT",
+                                endpoint: "api/articles/{documentId}",
+                                body: {
+                                    data: {
+                                        images: ["imageId"]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    common_errors: {
+                        "404": [
+                            "Numerical ID used instead of documentId",
+                            "Incorrect plural/singular form in endpoint",
+                            "DocumentId missing"
+                        ],
+                        "405": ["Incorrect endpoint (/article instead of /articles)"],
+                        "400": ["Data-Wrapper missing"]
+                    },
+                    best_practices: [
+                        "Always check schema first",
+                        "When using URLs, first validate the content with webtools",
+                        "Always use documentId for IDs",
+                        "Always use data-Wrapper for updates",
+                        "Always use pluralName for collections",
+                        "Check if singular/plural applies based on API type",
+                        "In Strapi 5: Direct attribute query without data-Wrapper",
+                        "Use documentId instead of id"
+                    ],
+                    debugging_guide: {
+                        steps: [
+                            "When 404: Check if plural/singular form is correct",
+                            "When 400: Check if data-Wrapper is present",
+                            "When errors in URLs: First validate with webtools",
+                            "When ID problems: Check on documentId",
+                            "Check schema and configuration in Strapi"
+                        ]
+                    },
+                    graphql_tips: {
+                        pagination: {
+                            example: `query {
+                                articles(pagination: { page: 1, pageSize: 10 }) {
+                                    documentId
+                                    name
+                                }
+                            }`
+                        },
+                        best_practices: [
+                            "Complete attribute specification",
+                            "No pagination parameter for simple queries",
+                            "Precise attribute writing"
+                        ]
+                    },
+                    initialization_steps: [
+                        "Get schema and analyze",
+                        "Capture Content Types and structures",
+                        "Remember endpoint names (pluralName/singularName)",
+                        "Document fields and types",
+                        "Identify relations",
+                        "Consider required fields and validations"
+                    ]
+                }
+            }
         },
     }
 );
@@ -109,13 +394,7 @@ interface Prompt {
 }
 
 // Define prompts
-const PROMPTS: Record<string, Prompt> = {
-    "Connect to Strapi": {
-        name: "Connect to Strapi",
-        description: "Start a conversation with an expert who understands both Strapi v4 and v5, their differences, and best practices",
-        arguments: []
-    }
-};
+const PROMPTS: Record<string, Prompt> = {};
 
 // List available prompts
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
@@ -130,21 +409,6 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     if (!prompt) {
         throw new Error(`Prompt not found: ${request.params.name}`);
     }
-
-    if (request.params.name === "Connect to Strapi") {
-        return {
-            messages: [
-                {
-                    role: "assistant",
-                    content: {
-                        type: "text",
-                        text: CONNECT_TO_STRAPI_CONTENT
-                    }
-                }
-            ]
-        };
-    }
-
     throw new Error("Prompt implementation not found");
 });
 
@@ -415,7 +679,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const exampleConfig = {
                     "myserver": {
                         "api_url": "http://localhost:1337",
-                        "api_key": "your-jwt-token-from-strapi-admin"
+                        "api_key": "your-jwt-token-from-strapi-admin",
+                        "version": "5.*"
                     }
                 };
 
@@ -443,10 +708,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
-            const servers = Object.keys(config).map(serverName => ({
-                name: serverName,
-                api_url: config[serverName].api_url
-            }));
+            const servers = Object.keys(config).map(serverName => {
+                const serverConfig = config[serverName];
+                const version = serverConfig.version || "v4"; // Default to v4 if not specified
+
+                // Extract major version from different formats: "5.*", "4.1.5", "v4", "4.*"
+                let majorVersion: keyof StrapiVersionDifferences;
+                if (version.includes('*')) {
+                    // Handle "5.*" or "4.*" format
+                    majorVersion = version.split('.')[0] as keyof StrapiVersionDifferences;
+                } else if (version.startsWith('v')) {
+                    // Handle "v4" or "v5" format
+                    majorVersion = version.substring(1) as keyof StrapiVersionDifferences;
+                } else {
+                    // Handle "4.1.5" or plain "4" format
+                    majorVersion = version.split('.')[0] as keyof StrapiVersionDifferences;
+                }
+
+                return {
+                    name: serverName,
+                    api_url: serverConfig.api_url,
+                    version: serverConfig.version,
+                    version_details: STRAPI_VERSION_DIFFERENCES[majorVersion]
+                };
+            });
 
             return {
                 content: [
@@ -455,7 +740,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         text: JSON.stringify({
                             servers,
                             config_path: CONFIG_PATH,
-                            help: "To add more servers, edit the configuration file at the path shown above."
+                            help: "To add more servers, edit the configuration file at the path shown above.",
+                            version_differences: STRAPI_VERSION_DIFFERENCES
                         }, null, 2),
                     },
                 ],
