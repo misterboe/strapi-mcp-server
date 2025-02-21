@@ -2,6 +2,16 @@
 
 A Model Context Protocol server for interacting with Strapi CMS. This server enables AI assistants to interact with your Strapi instance through a standardized interface, supporting content types and REST API operations.
 
+## Changelog
+
+### Version 2.1.0
+
+- Improved compatibility with both Strapi v4 and v5
+- Removed automatic validation to support different data structures between versions
+- Enhanced error messages with version-specific hints
+- Simplified request handling to give clients more control
+- Updated documentation with clear examples for both versions
+
 ## Features
 
 - 🔍 Schema introspection
