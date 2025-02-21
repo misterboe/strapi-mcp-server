@@ -300,7 +300,7 @@ async function makeRestRequest(
     }
 }
 
-// Update handleStrapiError with enhanced error messages
+// Update handleStrapiError with better component-related error messages
 async function handleStrapiError(response: import('node-fetch').Response, context: string): Promise<any> {
     if (!response.ok) {
         let errorMessage = `${context} failed with status: ${response.status}`;
@@ -317,17 +317,19 @@ async function handleStrapiError(response: import('node-fetch').Response, contex
                             .map((err: any) => `- ${err.path.join('.')}: ${err.message}`)
                             .join('\n');
                     }
-                    errorMessage += "\n\nHINT: Check the following:\n" +
-                        "1. All required fields are provided\n" +
-                        "2. Field types match the schema\n" +
-                        "3. Related content exists\n" +
-                        "4. Values are within allowed ranges";
+                    errorMessage += "\n\nHINT: For components, check:\n" +
+                        "1. Component structure is correct (single vs repeatable)\n" +
+                        "2. All required fields are provided\n" +
+                        "3. Field types match the schema\n" +
+                        "4. Component name matches exactly\n" +
+                        "5. Use populate parameter to read components first";
                 } else if (response.status === 404) {
-                    errorMessage += "\nHINT: Check the following:\n" +
+                    errorMessage += "\nHINT: Check:\n" +
                         "1. The endpoint path is correct\n" +
                         "2. The content type exists\n" +
-                        "3. The ID exists (for single item operations)\n" +
-                        "4. You're using the correct plural/singular form";
+                        "3. The ID exists\n" +
+                        "4. Component names are correct\n" +
+                        "5. You're using the correct plural/singular form";
                 }
             }
         } catch {
@@ -460,20 +462,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "strapi_rest",
-                description: "Execute REST API requests against Strapi endpoints. All query parameters are optional. Start with basic requests and add parameters only when needed.\n\n" +
-                    "Basic usage without params:\n" +
-                    "endpoint: 'api/articles'\n\n" +
-                    "Optional parameters examples:\n" +
-                    "1. Field selection (recommended):\n" +
-                    "params: { fields: ['title', 'content'] }\n\n" +
-                    "2. Selective populate:\n" +
-                    "params: { populate: ['category'] }\n\n" +
-                    "3. Detailed populate:\n" +
-                    "params: { populate: { category: { fields: ['name'] } } }\n\n" +
-                    "4. Sorting and Pagination:\n" +
-                    "params: { sort: ['publishedAt:desc'], pagination: { page: 1, pageSize: 10 } }\n\n" +
-                    "5. Filters:\n" +
-                    "params: { filters: { category: { $eq: 'news' } } }",
+                description: "Execute REST API requests against Strapi endpoints. Important notes for working with components:\n\n" +
+                    "1. Reading components:\n" +
+                    "params: { populate: ['SEO'] } // Populate a component\n" +
+                    "params: { populate: { SEO: { fields: ['Title', 'seoDescription'] } } } // With field selection\n\n" +
+                    "2. Updating components:\n" +
+                    "body: {\n" +
+                    "  data: {\n" +
+                    "    // For single components:\n" +
+                    "    componentName: {\n" +
+                    "      Title: 'value',\n" +
+                    "      seoDescription: 'value'\n" +
+                    "    },\n" +
+                    "    // For repeatable components:\n" +
+                    "    componentName: [\n" +
+                    "      { field: 'value' }\n" +
+                    "    ]\n" +
+                    "  }\n" +
+                    "}\n\n" +
+                    "3. Other parameters:\n" +
+                    "- fields: Select specific fields\n" +
+                    "- filters: Filter results\n" +
+                    "- sort: Sort results\n" +
+                    "- pagination: Page through results",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -493,13 +504,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                         params: {
                             type: "object",
-                            description: "Optional query parameters. Start with a simple request without params and add them as needed. Supports: fields, filters, populate, sort, pagination, etc.",
+                            description: "Optional query parameters for GET requests. For components, use populate: ['componentName'] or populate: { componentName: { fields: ['field1'] } }",
                             additionalProperties: true,
                             required: false
                         },
                         body: {
                             type: "object",
-                            description: "Optional request body for POST/PUT requests",
+                            description: "Request body for POST/PUT requests. For components, use: { data: { componentName: { field: 'value' } } } for single components or { data: { componentName: [{ field: 'value' }] } } for repeatable components",
                             additionalProperties: true,
                             required: false
                         }
