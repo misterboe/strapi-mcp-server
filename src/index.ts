@@ -2,9 +2,16 @@
 
 /**
  * Strapi MCP Server
- * Version 2.2.0
+ * Version 2.3.0
  * 
  * Version History:
+ * 2.3.0 - Documentation & Configuration Enhancement
+ * - Added detailed project documentation to CLAUDE.md
+ * - Expanded configuration options with version support
+ * - Improved error messaging and troubleshooting guides
+ * - Enhanced REST API documentation and examples
+ * - Added best practices for content management
+ * 
  * 2.2.0 - Security & Version Handling Update
  * - Added strict write protection policy
  * - Enhanced version format support (5.*, 4.1.5, v4, etc.)
@@ -163,7 +170,7 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.2.0",
+        version: "2.3.0",
     },
     {
         capabilities: {
@@ -468,8 +475,21 @@ async function processImage(buffer: Buffer, format: string, quality: number): Pr
     return sharpInstance.toBuffer();
 }
 
-// Update uploadMedia with server config
-async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>): Promise<any> {
+// Update uploadMedia with server config and authorization check
+async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>, userAuthorized: boolean = false): Promise<any> {
+    // Check for explicit user authorization for this upload operation
+    if (!userAuthorized) {
+        throw new Error(
+            `AUTHORIZATION REQUIRED: Media upload operations require explicit user authorization.\n\n` +
+            `IMPORTANT: The client MUST:\n` +
+            `1. Ask the user for explicit permission before uploading this media\n` +
+            `2. Show the user what media will be uploaded\n` +
+            `3. Receive clear confirmation from the user\n` +
+            `4. Set userAuthorized=true when making the request\n\n` +
+            `This is a security measure to prevent unauthorized uploads.`
+        );
+    }
+
     const serverConfig = getServerConfig(serverName);
     const formData = new FormData();
 
@@ -557,11 +577,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "strapi_rest",
-                description: "Execute REST API requests against Strapi endpoints. Important notes for working with components:\n\n" +
+                description: "Execute REST API requests against Strapi endpoints. IMPORTANT: All write operations (POST, PUT, DELETE) require explicit user authorization via the userAuthorized parameter.\n\n" +
                     "1. Reading components:\n" +
                     "params: { populate: ['SEO'] } // Populate a component\n" +
                     "params: { populate: { SEO: { fields: ['Title', 'seoDescription'] } } } // With field selection\n\n" +
-                    "2. Updating components:\n" +
+                    "2. Updating components (REQUIRES USER AUTHORIZATION):\n" +
                     "body: {\n" +
                     "  data: {\n" +
                     "    // For single components:\n" +
@@ -574,7 +594,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "      { field: 'value' }\n" +
                     "    ]\n" +
                     "  }\n" +
-                    "}\n\n" +
+                    "}\n" +
+                    "userAuthorized: true // Must set this to true for POST/PUT/DELETE after getting user permission\n\n" +
                     "3. Other parameters:\n" +
                     "- fields: Select specific fields\n" +
                     "- filters: Filter results\n" +
@@ -608,6 +629,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: "Request body for POST/PUT requests. For components, use: { data: { componentName: { field: 'value' } } } for single components or { data: { componentName: [{ field: 'value' }] } } for repeatable components",
                             additionalProperties: true,
                             required: false
+                        },
+                        userAuthorized: {
+                            type: "boolean",
+                            description: "REQUIRED for POST/PUT/DELETE operations. Client MUST obtain explicit user authorization before setting this to true.",
+                            default: false
                         }
                     },
                     required: ["server", "endpoint"],
@@ -615,7 +641,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "strapi_upload_media",
-                description: "Upload media to Strapi's media library from a URL with format conversion, quality control, and metadata options. Returns the uploaded file information including the ID for future reference.",
+                description: "Upload media to Strapi's media library from a URL with format conversion, quality control, and metadata options. IMPORTANT: This is a write operation that REQUIRES explicit user authorization via the userAuthorized parameter.",
                 inputSchema: {
                     type: "object",
                     properties: {
@@ -660,6 +686,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                                     description: "Detailed description of the image"
                                 }
                             }
+                        },
+                        userAuthorized: {
+                            type: "boolean",
+                            description: "REQUIRED for media upload operations. Client MUST obtain explicit user authorization before setting this to true.",
+                            default: false
                         }
                     },
                     required: ["server", "url"]
@@ -832,8 +863,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_rest") {
-            const { server, endpoint, method, params, body } = args as { server: string, endpoint: string, method: string, params?: Record<string, any>, body?: Record<string, any> };
-            const data = await makeRestRequest(server, endpoint, method, params, body);
+            const { server, endpoint, method, params, body, userAuthorized } = args as { 
+                server: string, 
+                endpoint: string, 
+                method: string, 
+                params?: Record<string, any>, 
+                body?: Record<string, any>,
+                userAuthorized?: boolean
+            };
+            
+            const data = await makeRestRequest(server, endpoint, method, params, body, userAuthorized === true);
             return {
                 content: [
                     {
@@ -843,7 +882,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_upload_media") {
-            const { server, url, format, quality, metadata } = args as { server: string, url: string, format: string, quality: number, metadata?: Record<string, any> };
+            const { server, url, format, quality, metadata, userAuthorized } = args as { 
+                server: string, 
+                url: string, 
+                format: string, 
+                quality: number, 
+                metadata?: Record<string, any>,
+                userAuthorized?: boolean
+            };
 
             // Extract filename from URL
             const fileName = url.split('/').pop() || 'image';
@@ -854,8 +900,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             // Process the image if format conversion is requested
             const processedBuffer = await processImage(imageBuffer, format, quality);
 
-            // Upload to Strapi with metadata
-            const data = await uploadMedia(server, processedBuffer, fileName, format, metadata);
+            // Upload to Strapi with metadata (with authorization check)
+            const data = await uploadMedia(server, processedBuffer, fileName, format, metadata, userAuthorized === true);
 
             // Format response with helpful usage information
             const response = {
@@ -913,8 +959,22 @@ async function makeRestRequest(
     endpoint: string,
     method: string = 'GET',
     params?: Record<string, any>,
-    body?: Record<string, any>
+    body?: Record<string, any>,
+    userAuthorized: boolean = false
 ): Promise<any> {
+    // Check for write operations that require explicit user authorization
+    if ((method === 'POST' || method === 'PUT' || method === 'DELETE') && !userAuthorized) {
+        throw new Error(
+            `AUTHORIZATION REQUIRED: ${method} operations require explicit user authorization.\n\n` +
+            `IMPORTANT: The client MUST:\n` +
+            `1. Ask the user for explicit permission before making this request\n` +
+            `2. Show the user exactly what data will be modified\n` +
+            `3. Receive clear confirmation from the user\n` +
+            `4. Set userAuthorized=true when making the request\n\n` +
+            `This is a security measure to prevent unauthorized data modifications.`
+        );
+    }
+
     const serverConfig = getServerConfig(serverName);
     let url = `${serverConfig.API_URL}/${endpoint}`;
 
