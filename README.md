@@ -2,6 +2,10 @@
 
 A Model Context Protocol server for interacting with Strapi CMS. This server enables AI assistants to interact with your Strapi instance through a standardized interface, supporting content types and REST API operations.
 
+<a href="https://glama.ai/mcp/servers/qfdkybxvkp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/qfdkybxvkp/badge" alt="Strapi Server MCP server" />
+</a>
+
 ## Changelog
 
 ### Version 2.3.0 - Documentation & Configuration Enhancement
@@ -17,7 +21,7 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
 ### Version 2.2.0 - Security & Version Handling Update
 
 - 🔒 Added strict write protection policy
-- 🔄 Enhanced version format support (5.\*, 4.1.5, v4, etc.)
+- 🔄 Enhanced version format support (5.* , 4.1.5, v4, etc.)
 - 📚 Integrated documentation into server capabilities
 - 🚫 Removed connect prompt (now in capabilities)
 - ⚡ Improved error handling and validation
