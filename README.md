@@ -6,6 +6,8 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
   <img width="380" height="200" src="https://glama.ai/mcp/servers/qfdkybxvkp/badge" alt="Strapi Server MCP server" />
 </a>
 
+⚠️ **IMPORTANT DISCLAIMER**: This software has been developed with the assistance of AI technology. It is provided as-is and should NOT be used in production environments without thorough testing and validation. The code may contain errors, security vulnerabilities, or unexpected behavior. Use at your own risk for research, learning, or development purposes only.
+
 ## Changelog
 
 ### Version 2.3.0 - Documentation & Configuration Enhancement
@@ -21,7 +23,7 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
 ### Version 2.2.0 - Security & Version Handling Update
 
 - 🔒 Added strict write protection policy
-- 🔄 Enhanced version format support (5.* , 4.1.5, v4, etc.)
+- 🔄 Enhanced version format support (5.\* , 4.1.5, v4, etc.)
 - 📚 Integrated documentation into server capabilities
 - 🚫 Removed connect prompt (now in capabilities)
 - ⚡ Improved error handling and validation
@@ -59,7 +61,7 @@ You can use this server directly with npx in your Claude Desktop configuration:
   "mcpServers": {
     "strapi": {
       "command": "npx",
-      "args": ["-y", "@bschauer/strapi-mcp-server@2.3.0"]
+      "args": ["-y", "@bschauer/strapi-mcp-server@2.4.0"]
     }
   }
 }

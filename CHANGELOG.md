@@ -5,9 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2025-03-19
+
+### Added
+
+- Important security disclaimer in the README.md file
+- Clear warnings about AI-assisted development and production use
+
+### Changed
+
+- Updated project description to highlight security considerations
+- Improved documentation with clearer warnings
+
 ## [2.3.0] - 2025-03-04
 
 ### Added
+
 - Comprehensive project documentation in CLAUDE.md
 - Expanded configuration options with better version detection
 - Enhanced troubleshooting guides for common issues
@@ -15,12 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Best practices guide for content management
 
 ### Changed
+
 - Improved error messaging with version-specific guidance
 - Enhanced version detection from various format strings
 - Updated documentation with specific Strapi v4/v5 differences
 - Refined security model documentation
 
 ### Fixed
+
 - Version parsing from different format patterns
 - Error handling for version-specific API differences
 

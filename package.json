@@ -1,7 +1,7 @@
 {
     "name": "@bschauer/strapi-mcp-server",
-    "version": "2.3.0",
-    "description": "Model Context Protocol server implementation for Strapi CMS with enhanced documentation and configuration",
+    "version": "2.4.0",
+    "description": "Model Context Protocol server implementation for Strapi CMS with enhanced security disclaimer and configuration",
     "type": "module",
     "bin": {
         "@bschauer/strapi-mcp-server": "./build/index.js"
