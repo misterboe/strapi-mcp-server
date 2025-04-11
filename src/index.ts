@@ -35,7 +35,7 @@ import {
     GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import fetch from 'node-fetch';
+import fetch, { Response, RequestInit } from 'node-fetch';
 import FormData from 'form-data';
 import sharp from 'sharp';
 import { readFileSync } from 'fs';
@@ -170,7 +170,7 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.3.0",
+        version: "2.5.0",
     },
     {
         capabilities: {
@@ -835,10 +835,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_get_components") {
-            const { server, page, pageSize } = args as { server: string, page: number, pageSize: number };
+            const { server, page = 1, pageSize = 25 } = args as { server: string, page?: number, pageSize?: number };
             const params = {
-                'pagination[page]': page.toString(),
-                'pagination[pageSize]': pageSize.toString(),
+                'pagination[page]': (page || 1).toString(),
+                'pagination[pageSize]': (pageSize || 25).toString(),
             };
 
             const data = await makeStrapiRequest(server, "/api/content-type-builder/components", params);
@@ -863,15 +863,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_rest") {
-            const { server, endpoint, method, params, body, userAuthorized } = args as { 
-                server: string, 
-                endpoint: string, 
-                method: string, 
-                params?: Record<string, any>, 
+            const { server, endpoint, method, params, body, userAuthorized } = args as {
+                server: string,
+                endpoint: string,
+                method: string,
+                params?: Record<string, any>,
                 body?: Record<string, any>,
                 userAuthorized?: boolean
             };
-            
+
             const data = await makeRestRequest(server, endpoint, method, params, body, userAuthorized === true);
             return {
                 content: [
@@ -882,11 +882,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_upload_media") {
-            const { server, url, format, quality, metadata, userAuthorized } = args as { 
-                server: string, 
-                url: string, 
-                format: string, 
-                quality: number, 
+            const { server, url, format, quality, metadata, userAuthorized } = args as {
+                server: string,
+                url: string,
+                format: string,
+                quality: number,
                 metadata?: Record<string, any>,
                 userAuthorized?: boolean
             };
@@ -993,7 +993,7 @@ async function makeRestRequest(
         'Content-Type': 'application/json',
     };
 
-    const requestOptions: import('node-fetch').RequestInit = {
+    const requestOptions: RequestInit = {
         method,
         headers,
     };
@@ -1012,13 +1012,13 @@ async function makeRestRequest(
 }
 
 // Update error handler to be more generic and helpful
-async function handleStrapiError(response: import('node-fetch').Response, context: string): Promise<any> {
+async function handleStrapiError(response: Response, context: string): Promise<any> {
     if (!response.ok) {
         let errorMessage = `${context} failed with status: ${response.status}`;
         try {
-            const errorData = await response.json();
-            if (errorData.error) {
-                errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
+            const errorData = await response.json() as any;
+            if (errorData && typeof errorData === 'object' && 'error' in errorData) {
+                errorMessage += ` - ${errorData.error?.message || JSON.stringify(errorData.error)}`;
 
                 // Add helpful hints based on status
                 if (response.status === 400) {

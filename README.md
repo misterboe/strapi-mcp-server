@@ -61,7 +61,7 @@ You can use this server directly with npx in your Claude Desktop configuration:
   "mcpServers": {
     "strapi": {
       "command": "npx",
-      "args": ["-y", "@bschauer/strapi-mcp-server@2.4.0"]
+      "args": ["-y", "@bschauer/strapi-mcp-server@2.5.0"]
     }
   }
 }

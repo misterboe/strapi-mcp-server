@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2025-04-11
+
+### Changed
+
+- Updated all dependencies to their latest versions
+- Updated `@modelcontextprotocol/sdk` from ^1.0.3 to ^1.9.0
+- Updated node-fetch from v2 to v3 with proper ESM imports and type references
+- Improved TypeScript type safety in error handling
+- Enhanced compatibility with latest Node.js versions
+
 ## [2.4.0] - 2025-03-19
 
 ### Added
