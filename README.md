@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/misterboe-strapi-mcp-server-badge.png)](https://mseep.ai/app/misterboe-strapi-mcp-server)
+
 # Strapi MCP Server
 
 A Model Context Protocol server for interacting with Strapi CMS. This server enables AI assistants to interact with your Strapi instance through a standardized interface, supporting content types and REST API operations.
