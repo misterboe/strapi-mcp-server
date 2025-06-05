@@ -1,12 +1,21 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Strapi MCP Server Development Guide
 
-## Build Commands
-- `npm run build` - Build the project
-- `npm run build:watch` - Build with watch mode
-- `npm run start` - Start the server from build
-- `npm run dev` - Run with ts-node
-- `npm run dev:watch` - Run with nodemon watch mode
-- `npm run prepublishOnly` - Prepare for publishing
+## Development Commands
+- `npm run build` - Compile TypeScript to build/ directory and make executable
+- `npm run build:watch` - Build with watch mode for development
+- `npm run start` - Start the compiled server from build/index.js
+- `npm run dev` - Run directly with ts-node for development
+- `npm run dev:watch` - Run with nodemon for hot reload during development
+- `npm run prepublishOnly` - Prepare for publishing (runs build automatically)
+
+## Testing
+- No formal test suite exists; test manually using MCP client
+- Use Claude Desktop or other MCP clients for integration testing
+- Configuration testing: create test config in `~/.mcp/strapi-mcp-server.config.json`
 
 ## Code Style Guidelines
 - **TypeScript**: Use strict mode with ES2022 target
@@ -20,10 +29,13 @@
 - **Formatting**: 2-space indentation, semicolons required
 
 ## Project Architecture
+- Single TypeScript file (`src/index.ts`) implements the entire MCP server
+- Built on @modelcontextprotocol/sdk with stdio transport for CLI usage
+- Configuration loaded from `~/.mcp/strapi-mcp-server.config.json`
 - Server implements Model Context Protocol (MCP) for Strapi CMS
 - Serves as middleware between AI assistants and Strapi instances
 - Handles schema introspection, REST operations, media uploads
-- Version 2.2.0 focuses on security and version compatibility
+- Current version focuses on security and version compatibility
 - Supports both Strapi v4 and v5 with automatic version detection
 
 ## Key Features

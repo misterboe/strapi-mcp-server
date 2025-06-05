@@ -2,10 +2,10 @@
 
 /**
  * Strapi MCP Server
- * Version 2.3.0
+ * Version 2.5.1
  * 
  * Version History:
- * 2.3.0 - Documentation & Configuration Enhancement
+ * 2.5.1 - Documentation & Configuration Enhancement
  * - Added detailed project documentation to CLAUDE.md
  * - Expanded configuration options with version support
  * - Improved error messaging and troubleshooting guides
@@ -34,7 +34,6 @@ import {
     ListPromptsRequestSchema,
     GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import fetch, { Response, RequestInit } from 'node-fetch';
 import FormData from 'form-data';
 import sharp from 'sharp';
@@ -170,7 +169,7 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.5.0",
+        version: "2.5.1",
     },
     {
         capabilities: {
@@ -530,15 +529,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 name: "strapi_list_servers",
                 description: "List all available Strapi servers from the configuration.",
                 inputSchema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {},
                     required: [],
+                    additionalProperties: false
                 },
             },
             {
                 name: "strapi_get_content_types",
                 description: "Get all content types from Strapi. Returns the complete schema of all content types.",
                 inputSchema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
                         server: {
@@ -547,12 +549,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         }
                     },
                     required: ["server"],
+                    additionalProperties: false
                 },
             },
             {
                 name: "strapi_get_components",
                 description: "Get all components from Strapi with pagination support. Returns both component data and pagination metadata (page, pageSize, total, pageCount).",
                 inputSchema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
                         server: {
@@ -570,9 +574,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: "Number of items per page",
                             minimum: 1,
                             default: 25
-                        },
+                        }
                     },
                     required: ["server"],
+                    additionalProperties: false
                 },
             },
             {
@@ -602,6 +607,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "- sort: Sort results\n" +
                     "- pagination: Page through results",
                 inputSchema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
                         server: {
@@ -621,14 +627,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         params: {
                             type: "object",
                             description: "Optional query parameters for GET requests. For components, use populate: ['componentName'] or populate: { componentName: { fields: ['field1'] } }",
-                            additionalProperties: true,
-                            required: false
+                            additionalProperties: true
                         },
                         body: {
                             type: "object",
                             description: "Request body for POST/PUT requests. For components, use: { data: { componentName: { field: 'value' } } } for single components or { data: { componentName: [{ field: 'value' }] } } for repeatable components",
-                            additionalProperties: true,
-                            required: false
+                            additionalProperties: true
                         },
                         userAuthorized: {
                             type: "boolean",
@@ -637,12 +641,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         }
                     },
                     required: ["server", "endpoint"],
+                    additionalProperties: false
                 },
             },
             {
                 name: "strapi_upload_media",
                 description: "Upload media to Strapi's media library from a URL with format conversion, quality control, and metadata options. IMPORTANT: This is a write operation that REQUIRES explicit user authorization via the userAuthorized parameter.",
                 inputSchema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
                         server: {
@@ -685,7 +691,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                                     type: "string",
                                     description: "Detailed description of the image"
                                 }
-                            }
+                            },
+                            additionalProperties: false
                         },
                         userAuthorized: {
                             type: "boolean",
@@ -693,7 +700,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             default: false
                         }
                     },
-                    required: ["server", "url"]
+                    required: ["server", "url"],
+                    additionalProperties: false
                 }
             }
         ],
