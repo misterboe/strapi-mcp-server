@@ -10,15 +10,17 @@ A Model Context Protocol server for interacting with Strapi CMS. This server ena
 
 ## Changelog
 
-### Version 2.5.1 - Documentation & Configuration Enhancement
+### Version 2.6.0 - Enhanced Validation & Debugging Update
 
-- 📚 Added comprehensive project documentation in CLAUDE.md
-- ⚙️ Expanded configuration options with better version detection
-- 🛠️ Enhanced troubleshooting guides for common issues
-- 🔄 Detailed REST API documentation with practical examples
-- 📝 Best practices guide for content management
-- 🐛 Fixed version parsing from different format patterns
-- 🔍 Improved error messaging with version-specific guidance
+- 🔧 Implemented structured error handling with McpError and ErrorCode
+- ✅ Added comprehensive Zod validation for runtime type safety
+- 📊 Integrated comprehensive logging system with request tracking
+- 🐛 Added debug mode configuration with environment variables
+- 🧹 Removed unused prompt handlers for cleaner codebase
+- ⬆️ Updated all dependencies to latest versions
+- 📖 Added DEBUGGING.md guide for development workflow
+- 🛡️ Enhanced security with better input validation
+- 🚀 Improved developer experience with detailed error messages
 
 For complete version history, see [CHANGELOG.md](./CHANGELOG.md).
 
@@ -45,7 +47,7 @@ You can use this server directly with npx in your Claude Desktop configuration:
   "mcpServers": {
     "strapi": {
       "command": "npx",
-      "args": ["-y", "@bschauer/strapi-mcp-server@2.5.1"]
+      "args": ["-y", "@bschauer/strapi-mcp-server@2.6.0"]
     }
   }
 }

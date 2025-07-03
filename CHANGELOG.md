@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2025-07-03
+
+### Added
+
+- Comprehensive Zod validation for all tool inputs with runtime type safety
+- Structured error handling using McpError and ErrorCode from MCP SDK
+- Comprehensive logging system with request tracking and performance monitoring
+- Debug mode configuration with environment variables (MCP_LOG_LEVEL, MCP_ENABLE_*)
+- DEBUGGING.md guide with practical troubleshooting workflows
+- LOGGING.md documentation for the logging system
+- Request ID tracking for complete request lifecycle monitoring
+- Data sanitization for secure logging (removes sensitive information)
+- Performance monitoring with slow request detection
+
+### Changed
+
+- Updated all dependencies to latest versions (@modelcontextprotocol/sdk@1.13.3, etc.)
+- Enhanced input validation with detailed error messages and field-specific feedback
+- Improved error handling with proper categorization (InvalidParams, InternalError, etc.)
+- Enhanced type safety throughout the codebase with explicit TypeScript types
+- Better developer experience with detailed validation errors and debugging information
+
+### Removed
+
+- Unused prompt handlers and related code for cleaner codebase
+- Unnecessary imports and dependencies
+
+### Fixed
+
+- Runtime type validation for all tool parameters
+- Error categorization following MCP protocol specifications
+- Memory usage optimization through improved logging
+
 ## [2.5.1] - 2025-05-06
 
 ### Changed

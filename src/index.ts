@@ -2,9 +2,18 @@
 
 /**
  * Strapi MCP Server
- * Version 2.5.1
+ * Version 2.6.0
  * 
  * Version History:
+ * 2.6.0 - Enhanced Validation & Debugging Update
+ * - Implemented structured error handling with McpError and ErrorCode
+ * - Added comprehensive Zod validation for runtime type safety
+ * - Integrated comprehensive logging system with request tracking
+ * - Added debug mode configuration with environment variables
+ * - Removed unused prompt handlers for cleaner codebase
+ * - Updated all dependencies to latest versions
+ * - Added DEBUGGING.md guide for development workflow
+ * 
  * 2.5.1 - Documentation & Configuration Enhancement
  * - Added detailed project documentation to CLAUDE.md
  * - Expanded configuration options with version support
@@ -31,8 +40,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
-    ListPromptsRequestSchema,
-    GetPromptRequestSchema,
+    McpError,
+    ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
 import fetch, { Response, RequestInit } from 'node-fetch';
 import FormData from 'form-data';
@@ -41,6 +50,381 @@ import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import qs from 'qs';
+import { z } from 'zod';
+import { createHash, randomUUID } from 'crypto';
+
+// ===========================================
+// Comprehensive Logging and Debugging System
+// ===========================================
+
+/**
+ * Log levels for structured logging
+ */
+enum LogLevel {
+    ERROR = 0,
+    WARN = 1,
+    INFO = 2,
+    DEBUG = 3,
+    TRACE = 4
+}
+
+/**
+ * Interface for log entry structure
+ */
+interface LogEntry {
+    timestamp: string;
+    level: string;
+    requestId?: string;
+    operation?: string;
+    server?: string;
+    endpoint?: string;
+    method?: string;
+    duration?: number;
+    error?: boolean;
+    message: string;
+    context?: Record<string, any>;
+    sanitized?: boolean;
+}
+
+/**
+ * Configuration for the logging system
+ */
+interface LogConfig {
+    level: LogLevel;
+    enableRequestTracking: boolean;
+    enablePerformanceMonitoring: boolean;
+    sanitizeData: boolean;
+    maxLogLength: number;
+    includeStackTrace: boolean;
+}
+
+/**
+ * Comprehensive logging class with structured output, request tracking, and performance monitoring
+ */
+class McpLogger {
+    private config: LogConfig;
+    private activeRequests: Map<string, { start: number; operation: string; server?: string }>;
+
+    constructor() {
+        this.config = this.loadConfig();
+        this.activeRequests = new Map();
+        
+        // Log startup configuration
+        this.info('Logger initialized', {
+            level: LogLevel[this.config.level],
+            requestTracking: this.config.enableRequestTracking,
+            performanceMonitoring: this.config.enablePerformanceMonitoring,
+            sanitization: this.config.sanitizeData
+        });
+    }
+
+    /**
+     * Load configuration from environment variables
+     */
+    private loadConfig(): LogConfig {
+        const logLevelStr = process.env.MCP_LOG_LEVEL || 'INFO';
+        const logLevel = LogLevel[logLevelStr.toUpperCase() as keyof typeof LogLevel] ?? LogLevel.INFO;
+        
+        return {
+            level: logLevel,
+            enableRequestTracking: process.env.MCP_ENABLE_REQUEST_TRACKING !== 'false',
+            enablePerformanceMonitoring: process.env.MCP_ENABLE_PERFORMANCE_MONITORING !== 'false',
+            sanitizeData: process.env.MCP_SANITIZE_DATA !== 'false',
+            maxLogLength: parseInt(process.env.MCP_MAX_LOG_LENGTH || '10000'),
+            includeStackTrace: process.env.MCP_INCLUDE_STACK_TRACE === 'true'
+        };
+    }
+
+    /**
+     * Generate a unique request ID
+     */
+    generateRequestId(): string {
+        return randomUUID();
+    }
+
+    /**
+     * Start tracking a request
+     */
+    startRequest(requestId: string, operation: string, server?: string): void {
+        if (!this.config.enableRequestTracking) return;
+        
+        this.activeRequests.set(requestId, {
+            start: Date.now(),
+            operation,
+            server
+        });
+        
+        this.debug(`Request started: ${operation}`, {
+            requestId,
+            operation,
+            server
+        });
+    }
+
+    /**
+     * End tracking a request and log performance metrics
+     */
+    endRequest(requestId: string, success: boolean = true, error?: Error): void {
+        if (!this.config.enableRequestTracking) return;
+        
+        const requestData = this.activeRequests.get(requestId);
+        if (!requestData) return;
+        
+        const duration = Date.now() - requestData.start;
+        this.activeRequests.delete(requestId);
+        
+        const logData = {
+            requestId,
+            operation: requestData.operation,
+            server: requestData.server,
+            duration,
+            success,
+            error: !success
+        };
+        
+        if (success) {
+            this.info(`Request completed: ${requestData.operation}`, logData);
+        } else {
+            this.error(`Request failed: ${requestData.operation}`, logData, error);
+        }
+        
+        // Log performance warning for slow requests
+        if (this.config.enablePerformanceMonitoring && duration > 5000) {
+            this.warn(`Slow request detected: ${requestData.operation} took ${duration}ms`, logData);
+        }
+    }
+
+    /**
+     * Log API call performance
+     */
+    logApiCall(
+        requestId: string,
+        method: string,
+        endpoint: string,
+        duration: number,
+        status: number,
+        server?: string
+    ): void {
+        if (!this.config.enablePerformanceMonitoring) return;
+        
+        const logData = {
+            requestId,
+            method,
+            endpoint,
+            duration,
+            status,
+            server,
+            success: status >= 200 && status < 300
+        };
+        
+        if (status >= 400) {
+            this.warn(`API call failed: ${method} ${endpoint}`, logData);
+        } else if (duration > 2000) {
+            this.warn(`Slow API call: ${method} ${endpoint} took ${duration}ms`, logData);
+        } else {
+            this.debug(`API call: ${method} ${endpoint}`, logData);
+        }
+    }
+
+    /**
+     * Sanitize sensitive data from logs
+     */
+    private sanitizeData(data: any): any {
+        if (!this.config.sanitizeData) return data;
+        
+        const sensitiveKeys = [
+            'password', 'token', 'jwt', 'api_key', 'secret',
+            'authorization', 'auth', 'credentials', 'key'
+        ];
+        
+        const sanitize = (obj: any): any => {
+            if (typeof obj !== 'object' || obj === null) return obj;
+            
+            if (Array.isArray(obj)) {
+                return obj.map(item => sanitize(item));
+            }
+            
+            const sanitized: any = {};
+            for (const [key, value] of Object.entries(obj)) {
+                const lowerKey = key.toLowerCase();
+                if (sensitiveKeys.some(sensitive => lowerKey.includes(sensitive))) {
+                    sanitized[key] = '[REDACTED]';
+                } else if (typeof value === 'object' && value !== null) {
+                    sanitized[key] = sanitize(value);
+                } else {
+                    sanitized[key] = value;
+                }
+            }
+            return sanitized;
+        };
+        
+        return sanitize(data);
+    }
+
+    /**
+     * Create a structured log entry
+     */
+    private createLogEntry(
+        level: LogLevel,
+        message: string,
+        context?: Record<string, any>,
+        error?: Error
+    ): LogEntry {
+        const entry: LogEntry = {
+            timestamp: new Date().toISOString(),
+            level: LogLevel[level],
+            message: message.length > this.config.maxLogLength 
+                ? message.substring(0, this.config.maxLogLength) + '...' 
+                : message,
+            sanitized: this.config.sanitizeData
+        };
+        
+        if (context) {
+            entry.context = this.sanitizeData(context);
+            
+            // Extract common fields for easier filtering
+            if (context.requestId) entry.requestId = context.requestId;
+            if (context.operation) entry.operation = context.operation;
+            if (context.server) entry.server = context.server;
+            if (context.endpoint) entry.endpoint = context.endpoint;
+            if (context.method) entry.method = context.method;
+            if (context.duration) entry.duration = context.duration;
+            if (context.error) entry.error = context.error;
+        }
+        
+        if (error) {
+            entry.context = entry.context || {};
+            entry.context.error = {
+                name: error.name,
+                message: error.message,
+                ...(this.config.includeStackTrace && { stack: error.stack })
+            };
+            entry.error = true;
+        }
+        
+        return entry;
+    }
+
+    /**
+     * Output log entry to stderr (not stdout to avoid interfering with MCP protocol)
+     */
+    private output(entry: LogEntry): void {
+        if (this.shouldLog(LogLevel[entry.level as keyof typeof LogLevel])) {
+            process.stderr.write(JSON.stringify(entry) + '\n');
+        }
+    }
+
+    /**
+     * Check if we should log at the given level
+     */
+    private shouldLog(level: LogLevel): boolean {
+        return level <= this.config.level;
+    }
+
+    /**
+     * Log error message
+     */
+    error(message: string, context?: Record<string, any>, error?: Error): void {
+        this.output(this.createLogEntry(LogLevel.ERROR, message, context, error));
+    }
+
+    /**
+     * Log warning message
+     */
+    warn(message: string, context?: Record<string, any>): void {
+        this.output(this.createLogEntry(LogLevel.WARN, message, context));
+    }
+
+    /**
+     * Log info message
+     */
+    info(message: string, context?: Record<string, any>): void {
+        this.output(this.createLogEntry(LogLevel.INFO, message, context));
+    }
+
+    /**
+     * Log debug message
+     */
+    debug(message: string, context?: Record<string, any>): void {
+        this.output(this.createLogEntry(LogLevel.DEBUG, message, context));
+    }
+
+    /**
+     * Log trace message
+     */
+    trace(message: string, context?: Record<string, any>): void {
+        this.output(this.createLogEntry(LogLevel.TRACE, message, context));
+    }
+
+    /**
+     * Log validation errors with detailed context
+     */
+    logValidationError(toolName: string, error: z.ZodError, input: unknown, requestId?: string): void {
+        const context = {
+            requestId,
+            toolName,
+            input: this.sanitizeData(input),
+            validationErrors: error.errors.map(err => ({
+                path: err.path.join('.'),
+                message: err.message,
+                code: err.code,
+                received: 'received' in err ? err.received : undefined
+            }))
+        };
+        
+        this.error(`Validation failed for tool: ${toolName}`, context);
+    }
+
+    /**
+     * Log tool execution with timing
+     */
+    logToolExecution(
+        toolName: string,
+        args: unknown,
+        requestId: string,
+        duration: number,
+        success: boolean,
+        error?: Error
+    ): void {
+        const context = {
+            requestId,
+            toolName,
+            args: this.sanitizeData(args),
+            duration,
+            success,
+            error: !success
+        };
+        
+        if (success) {
+            this.info(`Tool executed successfully: ${toolName}`, context);
+        } else {
+            this.error(`Tool execution failed: ${toolName}`, context, error);
+        }
+    }
+
+    /**
+     * Get current configuration for debugging
+     */
+    getConfig(): LogConfig {
+        return { ...this.config };
+    }
+
+    /**
+     * Get active requests for debugging
+     */
+    getActiveRequests(): Array<{ requestId: string; operation: string; duration: number; server?: string }> {
+        const now = Date.now();
+        return Array.from(this.activeRequests.entries()).map(([requestId, data]) => ({
+            requestId,
+            operation: data.operation,
+            duration: now - data.start,
+            server: data.server
+        }));
+    }
+}
+
+// Create global logger instance
+const logger = new McpLogger();
 
 // Define version info type
 type VersionInfo = {
@@ -66,6 +450,211 @@ type StrapiVersionDifferences = {
     v4: VersionInfo;
     v5: VersionInfo;
 };
+
+// Zod Schemas for Tool Input Validation
+// ===========================================
+
+// Base schema for server parameter
+const ServerSchema = z.object({
+    server: z.string().min(1, "Server name is required and cannot be empty")
+});
+
+// Schema for strapi_list_servers tool (no parameters)
+const ListServersSchema = z.object({}).strict();
+
+// Schema for strapi_get_content_types tool
+const GetContentTypesSchema = z.object({
+    server: z.string().min(1, "Server name is required and cannot be empty")
+}).strict();
+
+// Schema for strapi_get_components tool
+const GetComponentsSchema = z.object({
+    server: z.string().min(1, "Server name is required and cannot be empty"),
+    page: z.number().int().min(1, "Page must be a positive integer").optional().default(1),
+    pageSize: z.number().int().min(1, "Page size must be a positive integer").optional().default(25)
+}).strict();
+
+// Schema for strapi_rest tool
+const RestSchema = z.object({
+    server: z.string().min(1, "Server name is required and cannot be empty"),
+    endpoint: z.string().min(1, "Endpoint is required and cannot be empty"),
+    method: z.enum(["GET", "POST", "PUT", "DELETE"], {
+        errorMap: () => ({ message: "Method must be one of: GET, POST, PUT, DELETE" })
+    }).optional().default("GET"),
+    params: z.record(z.any()).optional(),
+    body: z.record(z.any()).optional(),
+    userAuthorized: z.boolean().optional().default(false)
+}).strict().refine(
+    (data) => {
+        // For write operations, ensure userAuthorized is explicitly set to true
+        if (["POST", "PUT", "DELETE"].includes(data.method) && !data.userAuthorized) {
+            return false;
+        }
+        return true;
+    },
+    {
+        message: "Write operations (POST, PUT, DELETE) require explicit user authorization (userAuthorized: true)",
+        path: ["userAuthorized"]
+    }
+);
+
+// Schema for media metadata
+const MediaMetadataSchema = z.object({
+    name: z.string().optional(),
+    caption: z.string().optional(),
+    alternativeText: z.string().optional(),
+    description: z.string().optional()
+}).strict();
+
+// Schema for strapi_upload_media tool
+const UploadMediaSchema = z.object({
+    server: z.string().min(1, "Server name is required and cannot be empty"),
+    url: z.string().url("Must be a valid URL"),
+    format: z.enum(["jpeg", "png", "webp", "original"], {
+        errorMap: () => ({ message: "Format must be one of: jpeg, png, webp, original" })
+    }).optional().default("original"),
+    quality: z.number().int().min(1, "Quality must be between 1 and 100").max(100, "Quality must be between 1 and 100").optional().default(80),
+    metadata: MediaMetadataSchema.optional(),
+    userAuthorized: z.boolean().optional().default(false)
+}).strict().refine(
+    (data) => {
+        // Media upload requires explicit user authorization
+        if (!data.userAuthorized) {
+            return false;
+        }
+        return true;
+    },
+    {
+        message: "Media upload operations require explicit user authorization (userAuthorized: true)",
+        path: ["userAuthorized"]
+    }
+);
+
+// Collection of all schemas for easy access
+const ToolSchemas = {
+    strapi_list_servers: ListServersSchema,
+    strapi_get_content_types: GetContentTypesSchema,
+    strapi_get_components: GetComponentsSchema,
+    strapi_rest: RestSchema,
+    strapi_upload_media: UploadMediaSchema
+} as const;
+
+// TypeScript types derived from Zod schemas
+type ListServersInput = z.infer<typeof ListServersSchema>;
+type GetContentTypesInput = z.infer<typeof GetContentTypesSchema>;
+type GetComponentsInput = z.infer<typeof GetComponentsSchema>;
+type RestInput = z.infer<typeof RestSchema>;
+type UploadMediaInput = z.infer<typeof UploadMediaSchema>;
+
+// Validation helper function
+function validateToolInput<T extends keyof typeof ToolSchemas>(
+    toolName: T,
+    input: unknown,
+    requestId?: string
+): z.infer<typeof ToolSchemas[T]> {
+    const schema = ToolSchemas[toolName];
+    try {
+        logger.debug(`Validating input for tool: ${toolName}`, {
+            requestId,
+            toolName,
+            inputType: typeof input,
+            hasInput: input !== undefined
+        });
+        
+        const result = schema.parse(input);
+        
+        logger.debug(`Validation successful for tool: ${toolName}`, {
+            requestId,
+            toolName
+        });
+        
+        return result;
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            logger.logValidationError(toolName, error, input, requestId);
+            
+            const errorMessages = error.errors.map(err => {
+                const path = err.path.length > 0 ? `${err.path.join('.')}: ` : '';
+                return `${path}${err.message}`;
+            });
+            throw new Error(`Validation failed for ${toolName}:\n${errorMessages.join('\n')}`);
+        }
+        
+        logger.error(`Unexpected validation error for tool: ${toolName}`, {
+            requestId,
+            toolName,
+            errorType: error instanceof Error ? error.constructor.name : typeof error
+        }, error instanceof Error ? error : undefined);
+        
+        throw error;
+    }
+}
+
+// Helper function to convert Zod schema to JSON schema for MCP compatibility
+function zodToJsonSchema(schema: z.ZodSchema): any {
+    // This is a simplified conversion - in production, you might want to use a library like zod-to-json-schema
+    if (schema instanceof z.ZodObject) {
+        const shape = schema.shape;
+        const properties: any = {};
+        const required: string[] = [];
+        
+        for (const [key, value] of Object.entries(shape)) {
+            if (value instanceof z.ZodString) {
+                properties[key] = { type: "string" };
+                if (value._def.checks?.some((check: any) => check.kind === 'min' && check.value > 0)) {
+                    properties[key].minLength = 1;
+                }
+            } else if (value instanceof z.ZodNumber) {
+                properties[key] = { type: "number" };
+                const checks = value._def.checks || [];
+                for (const check of checks) {
+                    if (check.kind === 'min') properties[key].minimum = check.value;
+                    if (check.kind === 'max') properties[key].maximum = check.value;
+                    if (check.kind === 'int') properties[key].type = "integer";
+                }
+            } else if (value instanceof z.ZodBoolean) {
+                properties[key] = { type: "boolean" };
+            } else if (value instanceof z.ZodEnum) {
+                properties[key] = { type: "string", enum: value._def.values };
+            } else if (value instanceof z.ZodOptional) {
+                const innerSchema = value._def.innerType;
+                if (innerSchema instanceof z.ZodString) {
+                    properties[key] = { type: "string" };
+                } else if (innerSchema instanceof z.ZodNumber) {
+                    properties[key] = { type: "number" };
+                } else if (innerSchema instanceof z.ZodBoolean) {
+                    properties[key] = { type: "boolean" };
+                } else if (innerSchema instanceof z.ZodEnum) {
+                    properties[key] = { type: "string", enum: innerSchema._def.values };
+                } else {
+                    properties[key] = { type: "object", additionalProperties: true };
+                }
+            } else {
+                properties[key] = { type: "object", additionalProperties: true };
+            }
+            
+            if (!(value instanceof z.ZodOptional)) {
+                required.push(key);
+            }
+        }
+        
+        return {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            properties,
+            required,
+            additionalProperties: false
+        };
+    }
+    
+    return {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+    };
+}
 
 // Define version differences for reference
 const STRAPI_VERSION_DIFFERENCES: StrapiVersionDifferences = {
@@ -158,10 +747,19 @@ try {
     config = JSON.parse(configContent);
 
     if (Object.keys(config).length === 0) {
-        throw new Error('Config file exists but is empty');
+        throw new McpError(ErrorCode.InvalidParams, 'Config file exists but is empty');
     }
+    
+    logger.info('Configuration loaded successfully', {
+        configPath: CONFIG_PATH,
+        serverCount: Object.keys(config).length,
+        servers: Object.keys(config)
+    });
 } catch (error) {
-    console.error('Error reading config file:', error);
+    logger.error('Error reading config file', {
+        configPath: CONFIG_PATH,
+        errorType: error instanceof Error ? error.constructor.name : typeof error
+    }, error instanceof Error ? error : undefined);
     config = {};
 }
 
@@ -169,12 +767,11 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.5.1",
+        version: "2.6.0",
     },
     {
         capabilities: {
             tools: {},
-            prompts: {},
             strapi: {
                 security: {
                     write_protection: {
@@ -349,7 +946,8 @@ function getServerConfig(serverName: string): { API_URL: string, JWT: string } {
             }
         };
 
-        throw new Error(
+        throw new McpError(
+            ErrorCode.InvalidParams,
             `No server configuration found!\n\n` +
             `Please create a configuration file at:\n` +
             `${CONFIG_PATH}\n\n` +
@@ -366,7 +964,8 @@ function getServerConfig(serverName: string): { API_URL: string, JWT: string } {
 
     const serverConfig = config[serverName];
     if (!serverConfig) {
-        throw new Error(
+        throw new McpError(
+            ErrorCode.InvalidParams,
             `Server "${serverName}" not found in config.\n\n` +
             `Available servers: ${Object.keys(config).join(', ')}\n\n` +
             `To add a new server, edit:\n` +
@@ -386,40 +985,14 @@ function getServerConfig(serverName: string): { API_URL: string, JWT: string } {
     };
 }
 
-// Define prompt types
-interface PromptArgument {
-    name: string;
-    description: string;
-    required: boolean;
-}
-
-interface Prompt {
-    name: string;
-    description: string;
-    arguments: PromptArgument[];
-}
-
-// Define prompts
-const PROMPTS: Record<string, Prompt> = {};
-
-// List available prompts
-server.setRequestHandler(ListPromptsRequestSchema, async () => {
-    return {
-        prompts: Object.values(PROMPTS)
-    };
-});
-
-// Get specific prompt
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-    const prompt = PROMPTS[request.params.name];
-    if (!prompt) {
-        throw new Error(`Prompt not found: ${request.params.name}`);
-    }
-    throw new Error("Prompt implementation not found");
-});
 
 // Helper function for making Strapi API requests
-async function makeStrapiRequest(serverName: string, endpoint: string, params?: Record<string, string>): Promise<any> {
+async function makeStrapiRequest(
+    serverName: string, 
+    endpoint: string, 
+    params?: Record<string, string>, 
+    requestId?: string
+): Promise<any> {
     const serverConfig = getServerConfig(serverName);
     let url = `${serverConfig.API_URL}${endpoint}`;
     if (params) {
@@ -432,11 +1005,43 @@ async function makeStrapiRequest(serverName: string, endpoint: string, params?: 
         'Content-Type': 'application/json',
     };
 
+    const startTime = Date.now();
+    
+    logger.debug(`Making API request to Strapi`, {
+        requestId,
+        server: serverName,
+        endpoint,
+        method: 'GET',
+        hasParams: !!params,
+        url: url.replace(serverConfig.JWT, '[REDACTED]')
+    });
+
     try {
         const response = await fetch(url, { headers });
-        return await handleStrapiError(response, `Request to ${endpoint}`);
+        const duration = Date.now() - startTime;
+        
+        logger.logApiCall(
+            requestId || 'unknown',
+            'GET',
+            endpoint,
+            duration,
+            response.status,
+            serverName
+        );
+        
+        return await handleStrapiError(response, `Request to ${endpoint}`, requestId);
     } catch (error) {
-        console.error("Error making Strapi request:", error);
+        const duration = Date.now() - startTime;
+        
+        logger.error("Error making Strapi request", {
+            requestId,
+            server: serverName,
+            endpoint,
+            method: 'GET',
+            duration,
+            errorType: error instanceof Error ? error.constructor.name : typeof error
+        }, error instanceof Error ? error : undefined);
+        
         throw error;
     }
 }
@@ -445,7 +1050,7 @@ async function makeStrapiRequest(serverName: string, endpoint: string, params?: 
 async function downloadImage(url: string): Promise<Buffer> {
     const response = await fetch(url);
     if (!response.ok) {
-        throw new Error(`Failed to download image: ${response.statusText}`);
+        throw new McpError(ErrorCode.InternalError, `Failed to download image: ${response.statusText}`);
     }
     return Buffer.from(await response.arrayBuffer());
 }
@@ -475,10 +1080,11 @@ async function processImage(buffer: Buffer, format: string, quality: number): Pr
 }
 
 // Update uploadMedia with server config and authorization check
-async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>, userAuthorized: boolean = false): Promise<any> {
+async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: string, format: string, metadata?: Record<string, any>, userAuthorized: boolean = false, requestId?: string): Promise<any> {
     // Check for explicit user authorization for this upload operation
     if (!userAuthorized) {
-        throw new Error(
+        throw new McpError(
+            ErrorCode.InvalidParams,
             `AUTHORIZATION REQUIRED: Media upload operations require explicit user authorization.\n\n` +
             `IMPORTANT: The client MUST:\n` +
             `1. Ask the user for explicit permission before uploading this media\n` +
@@ -509,6 +1115,18 @@ async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: st
     }
 
     const url = `${serverConfig.API_URL}/api/upload`;
+    const startTime = Date.now();
+    
+    logger.debug(`Uploading media to Strapi`, {
+        requestId,
+        server: serverName,
+        fileName,
+        format,
+        hasMetadata: !!metadata,
+        bufferSize: imageBuffer.length,
+        userAuthorized
+    });
+    
     const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -518,7 +1136,18 @@ async function uploadMedia(serverName: string, imageBuffer: Buffer, fileName: st
         body: formData
     });
 
-    return handleStrapiError(response, 'Media upload');
+    const duration = Date.now() - startTime;
+    
+    logger.logApiCall(
+        requestId || 'unknown',
+        'POST',
+        '/api/upload',
+        duration,
+        response.status,
+        serverName
+    );
+
+    return handleStrapiError(response, 'Media upload', requestId);
 }
 
 // List available tools 
@@ -528,56 +1157,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             {
                 name: "strapi_list_servers",
                 description: "List all available Strapi servers from the configuration.",
-                inputSchema: {
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
-                    type: "object",
-                    properties: {},
-                    required: [],
-                    additionalProperties: false
-                },
+                inputSchema: zodToJsonSchema(ToolSchemas.strapi_list_servers),
             },
             {
                 name: "strapi_get_content_types",
                 description: "Get all content types from Strapi. Returns the complete schema of all content types.",
                 inputSchema: {
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
-                    type: "object",
+                    ...zodToJsonSchema(ToolSchemas.strapi_get_content_types),
                     properties: {
+                        ...zodToJsonSchema(ToolSchemas.strapi_get_content_types).properties,
                         server: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_get_content_types).properties.server,
                             description: "The name of the server to connect to"
                         }
-                    },
-                    required: ["server"],
-                    additionalProperties: false
+                    }
                 },
             },
             {
                 name: "strapi_get_components",
                 description: "Get all components from Strapi with pagination support. Returns both component data and pagination metadata (page, pageSize, total, pageCount).",
                 inputSchema: {
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
-                    type: "object",
+                    ...zodToJsonSchema(ToolSchemas.strapi_get_components),
                     properties: {
+                        ...zodToJsonSchema(ToolSchemas.strapi_get_components).properties,
                         server: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_get_components).properties.server,
                             description: "The name of the server to connect to"
                         },
                         page: {
-                            type: "number",
+                            ...zodToJsonSchema(ToolSchemas.strapi_get_components).properties.page,
                             description: "Page number (starts at 1)",
-                            minimum: 1,
                             default: 1
                         },
                         pageSize: {
-                            type: "number",
+                            ...zodToJsonSchema(ToolSchemas.strapi_get_components).properties.pageSize,
                             description: "Number of items per page",
-                            minimum: 1,
                             default: 25
                         }
-                    },
-                    required: ["server"],
-                    additionalProperties: false
+                    }
                 },
             },
             {
@@ -607,69 +1224,61 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "- sort: Sort results\n" +
                     "- pagination: Page through results",
                 inputSchema: {
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
-                    type: "object",
+                    ...zodToJsonSchema(ToolSchemas.strapi_rest),
                     properties: {
+                        ...zodToJsonSchema(ToolSchemas.strapi_rest).properties,
                         server: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.server,
                             description: "The name of the server to connect to"
                         },
                         endpoint: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.endpoint,
                             description: "The API endpoint (e.g., 'api/articles')"
                         },
                         method: {
-                            type: "string",
-                            enum: ["GET", "POST", "PUT", "DELETE"],
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.method,
                             description: "HTTP method to use",
                             default: "GET"
                         },
                         params: {
-                            type: "object",
-                            description: "Optional query parameters for GET requests. For components, use populate: ['componentName'] or populate: { componentName: { fields: ['field1'] } }",
-                            additionalProperties: true
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.params,
+                            description: "Optional query parameters for GET requests. For components, use populate: ['componentName'] or populate: { componentName: { fields: ['field1'] } }"
                         },
                         body: {
-                            type: "object",
-                            description: "Request body for POST/PUT requests. For components, use: { data: { componentName: { field: 'value' } } } for single components or { data: { componentName: [{ field: 'value' }] } } for repeatable components",
-                            additionalProperties: true
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.body,
+                            description: "Request body for POST/PUT requests. For components, use: { data: { componentName: { field: 'value' } } } for single components or { data: { componentName: [{ field: 'value' }] } } for repeatable components"
                         },
                         userAuthorized: {
-                            type: "boolean",
+                            ...zodToJsonSchema(ToolSchemas.strapi_rest).properties.userAuthorized,
                             description: "REQUIRED for POST/PUT/DELETE operations. Client MUST obtain explicit user authorization before setting this to true.",
                             default: false
                         }
-                    },
-                    required: ["server", "endpoint"],
-                    additionalProperties: false
+                    }
                 },
             },
             {
                 name: "strapi_upload_media",
                 description: "Upload media to Strapi's media library from a URL with format conversion, quality control, and metadata options. IMPORTANT: This is a write operation that REQUIRES explicit user authorization via the userAuthorized parameter.",
                 inputSchema: {
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
-                    type: "object",
+                    ...zodToJsonSchema(ToolSchemas.strapi_upload_media),
                     properties: {
+                        ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties,
                         server: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties.server,
                             description: "The name of the server to connect to"
                         },
                         url: {
-                            type: "string",
+                            ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties.url,
                             description: "URL of the image to upload"
                         },
                         format: {
-                            type: "string",
-                            enum: ["jpeg", "png", "webp", "original"],
+                            ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties.format,
                             description: "Target format for the image. Use 'original' to keep the source format.",
                             default: "original"
                         },
                         quality: {
-                            type: "number",
+                            ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties.quality,
                             description: "Image quality (1-100). Only applies when converting formats.",
-                            minimum: 1,
-                            maximum: 100,
                             default: 80
                         },
                         metadata: {
@@ -695,13 +1304,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             additionalProperties: false
                         },
                         userAuthorized: {
-                            type: "boolean",
+                            ...zodToJsonSchema(ToolSchemas.strapi_upload_media).properties.userAuthorized,
                             description: "REQUIRED for media upload operations. Client MUST obtain explicit user authorization before setting this to true.",
                             default: false
                         }
-                    },
-                    required: ["server", "url"],
-                    additionalProperties: false
+                    }
                 }
             }
         ],
@@ -711,9 +1318,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-
+    const requestId = logger.generateRequestId();
+    const startTime = Date.now();
+    
+    logger.startRequest(requestId, name);
+    
+    let success = false;
+    let result: any;
+    
     try {
         if (name === "strapi_list_servers") {
+            // Validate input using Zod
+            const validatedArgs = validateToolInput("strapi_list_servers", args, requestId);
             if (Object.keys(config).length === 0) {
                 const exampleConfig = {
                     "myserver": {
@@ -723,7 +1339,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     }
                 };
 
-                return {
+                result = {
                     content: [
                         {
                             type: "text",
@@ -772,7 +1388,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             });
 
-            return {
+            result = {
                 content: [
                     {
                         type: "text",
@@ -796,8 +1412,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_get_content_types") {
-            const { server } = args as { server: string };
-            const data = await makeStrapiRequest(server, "/api/content-type-builder/content-types");
+            // Validate input using Zod
+            const validatedArgs = validateToolInput("strapi_get_content_types", args, requestId);
+            const { server } = validatedArgs;
+            logger.startRequest(requestId, name, server);
+            const data = await makeStrapiRequest(server, "/api/content-type-builder/content-types", undefined, requestId);
 
             // Add helpful usage information to the response
             const response = {
@@ -834,7 +1453,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
             };
 
-            return {
+            result = {
                 content: [
                     {
                         type: "text",
@@ -843,13 +1462,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_get_components") {
-            const { server, page = 1, pageSize = 25 } = args as { server: string, page?: number, pageSize?: number };
+            // Validate input using Zod (with defaults applied)
+            const validatedArgs = validateToolInput("strapi_get_components", args, requestId);
+            const { server, page, pageSize } = validatedArgs;
+            logger.startRequest(requestId, name, server);
             const params = {
-                'pagination[page]': (page || 1).toString(),
-                'pagination[pageSize]': (pageSize || 25).toString(),
+                'pagination[page]': page.toString(),
+                'pagination[pageSize]': pageSize.toString(),
             };
 
-            const data = await makeStrapiRequest(server, "/api/content-type-builder/components", params);
+            const data = await makeStrapiRequest(server, "/api/content-type-builder/components", params, requestId);
 
             // Add pagination metadata to the response
             const response = {
@@ -862,7 +1484,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 },
             };
 
-            return {
+            result = {
                 content: [
                     {
                         type: "text",
@@ -871,17 +1493,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_rest") {
-            const { server, endpoint, method, params, body, userAuthorized } = args as {
-                server: string,
-                endpoint: string,
-                method: string,
-                params?: Record<string, any>,
-                body?: Record<string, any>,
-                userAuthorized?: boolean
-            };
+            // Validate input using Zod (includes authorization check)
+            const validatedArgs = validateToolInput("strapi_rest", args, requestId);
+            const { server, endpoint, method, params, body, userAuthorized } = validatedArgs;
+            logger.startRequest(requestId, name, server);
 
-            const data = await makeRestRequest(server, endpoint, method, params, body, userAuthorized === true);
-            return {
+            const data = await makeRestRequest(server, endpoint, method, params, body, userAuthorized, requestId);
+            result = {
                 content: [
                     {
                         type: "text",
@@ -890,14 +1508,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         } else if (name === "strapi_upload_media") {
-            const { server, url, format, quality, metadata, userAuthorized } = args as {
-                server: string,
-                url: string,
-                format: string,
-                quality: number,
-                metadata?: Record<string, any>,
-                userAuthorized?: boolean
-            };
+            // Validate input using Zod (includes authorization check)
+            const validatedArgs = validateToolInput("strapi_upload_media", args, requestId);
+            const { server, url, format, quality, metadata, userAuthorized } = validatedArgs;
+            logger.startRequest(requestId, name, server);
 
             // Extract filename from URL
             const fileName = url.split('/').pop() || 'image';
@@ -909,7 +1523,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const processedBuffer = await processImage(imageBuffer, format, quality);
 
             // Upload to Strapi with metadata (with authorization check)
-            const data = await uploadMedia(server, processedBuffer, fileName, format, metadata, userAuthorized === true);
+            const data = await uploadMedia(server, processedBuffer, fileName, format, metadata, userAuthorized, requestId);
 
             // Format response with helpful usage information
             const response = {
@@ -936,7 +1550,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
             };
 
-            return {
+            result = {
                 content: [
                     {
                         type: "text",
@@ -945,10 +1559,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ]
             };
         } else {
-            throw new Error(`Unknown tool: ${name}`);
+            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
+        
+        success = true;
+        return result;
     } catch (error: unknown) {
-        console.error("Error executing tool:", error);
+        const duration = Date.now() - startTime;
+        logger.endRequest(requestId, false, error instanceof Error ? error : undefined);
+        logger.logToolExecution(name, args, requestId, duration, false, error instanceof Error ? error : undefined);
+        
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         return {
             content: [
@@ -958,6 +1578,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 },
             ],
         };
+    } finally {
+        if (success) {
+            const duration = Date.now() - startTime;
+            logger.endRequest(requestId, true);
+            logger.logToolExecution(name, args, requestId, duration, true);
+        }
     }
 });
 
@@ -968,11 +1594,13 @@ async function makeRestRequest(
     method: string = 'GET',
     params?: Record<string, any>,
     body?: Record<string, any>,
-    userAuthorized: boolean = false
+    userAuthorized: boolean = false,
+    requestId?: string
 ): Promise<any> {
     // Check for write operations that require explicit user authorization
     if ((method === 'POST' || method === 'PUT' || method === 'DELETE') && !userAuthorized) {
-        throw new Error(
+        throw new McpError(
+            ErrorCode.InvalidParams,
             `AUTHORIZATION REQUIRED: ${method} operations require explicit user authorization.\n\n` +
             `IMPORTANT: The client MUST:\n` +
             `1. Ask the user for explicit permission before making this request\n` +
@@ -1010,21 +1638,57 @@ async function makeRestRequest(
         requestOptions.body = JSON.stringify(body);
     }
 
+    const startTime = Date.now();
+    
+    logger.debug(`Making REST request to Strapi`, {
+        requestId,
+        server: serverName,
+        endpoint,
+        method,
+        hasParams: !!params,
+        hasBody: !!body,
+        userAuthorized,
+        url: url.replace(serverConfig.JWT, '[REDACTED]')
+    });
+
     try {
         const response = await fetch(url, requestOptions);
-        return await handleStrapiError(response, `REST request to ${endpoint}`);
+        const duration = Date.now() - startTime;
+        
+        logger.logApiCall(
+            requestId || 'unknown',
+            method,
+            endpoint,
+            duration,
+            response.status,
+            serverName
+        );
+        
+        return await handleStrapiError(response, `REST request to ${endpoint}`, requestId);
     } catch (error) {
-        console.error(`REST request to ${endpoint} failed:`, error);
+        const duration = Date.now() - startTime;
+        
+        logger.error(`REST request to ${endpoint} failed`, {
+            requestId,
+            server: serverName,
+            endpoint,
+            method,
+            duration,
+            errorType: error instanceof Error ? error.constructor.name : typeof error
+        }, error instanceof Error ? error : undefined);
+        
         throw error;
     }
 }
 
 // Update error handler to be more generic and helpful
-async function handleStrapiError(response: Response, context: string): Promise<any> {
+async function handleStrapiError(response: Response, context: string, requestId?: string): Promise<any> {
     if (!response.ok) {
         let errorMessage = `${context} failed with status: ${response.status}`;
+        let errorData: any = null;
+        
         try {
-            const errorData = await response.json() as any;
+            errorData = await response.json() as any;
             if (errorData && typeof errorData === 'object' && 'error' in errorData) {
                 errorMessage += ` - ${errorData.error?.message || JSON.stringify(errorData.error)}`;
 
@@ -1038,19 +1702,58 @@ async function handleStrapiError(response: Response, context: string): Promise<a
         } catch {
             errorMessage += ` - ${response.statusText}`;
         }
-        throw new Error(errorMessage);
+        
+        logger.error(`Strapi API error: ${context}`, {
+            requestId,
+            status: response.status,
+            statusText: response.statusText,
+            url: response.url,
+            errorData: errorData,
+            context
+        });
+        
+        throw new McpError(ErrorCode.InternalError, errorMessage);
     }
+    
+    logger.debug(`Strapi API success: ${context}`, {
+        requestId,
+        status: response.status,
+        url: response.url
+    });
+    
     return response.json();
 }
 
 // Start the server
 async function main() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error("Strapi MCP Server running on stdio");
+    try {
+        logger.info("Starting Strapi MCP Server", {
+            version: "2.6.0",
+            configuredServers: Object.keys(config).length,
+            logLevel: LogLevel[logger.getConfig().level]
+        });
+        
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+        
+        logger.info("Strapi MCP Server started successfully", {
+            transport: "stdio",
+            hasCapabilities: true
+        });
+        
+        // Use stderr for compatibility message (not stdout which interferes with MCP protocol)
+        process.stderr.write("Strapi MCP Server running on stdio\n");
+    } catch (error) {
+        logger.error("Failed to start Strapi MCP Server", {
+            errorType: error instanceof Error ? error.constructor.name : typeof error
+        }, error instanceof Error ? error : undefined);
+        throw error;
+    }
 }
 
 main().catch((error: unknown) => {
-    console.error("Fatal error in main():", error);
+    logger.error("Fatal error in main()", {
+        errorType: error instanceof Error ? error.constructor.name : typeof error
+    }, error instanceof Error ? error : undefined);
     process.exit(1);
 }); 

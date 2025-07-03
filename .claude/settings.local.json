@@ -7,8 +7,30 @@
       "Bash(npm run:*)",
       "Bash(npm update)",
       "Bash(npm uninstall:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm update:*)",
+      "Bash(npm outdated)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:modelcontextprotocol.io)",
+      "Bash(node:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:www.mcpevals.io)",
+      "WebFetch(domain:www.stainless.com)",
+      "Bash(timeout:*)",
+      "Bash(rm:*)",
+      "mcp__ide__getDiagnostics",
+      "mcp__strapi__strapi_list_servers",
+      "mcp__strapi__strapi_get_content_types",
+      "mcp__strapi__strapi_rest",
+      "Bash(mcp-inspector:*)",
+      "Bash(pkill:*)",
+      "Bash(npm info:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "strapi"
+  ]
 }
