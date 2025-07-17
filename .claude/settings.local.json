@@ -25,7 +25,12 @@
       "mcp__strapi__strapi_rest",
       "Bash(mcp-inspector:*)",
       "Bash(pkill:*)",
-      "Bash(npm info:*)"
+      "Bash(npm info:*)",
+      "Bash(git commit:*)",
+      "Bash(npm whoami:*)",
+      "Bash(npm publish:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   },

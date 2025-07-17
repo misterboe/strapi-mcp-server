@@ -470,8 +470,34 @@ const GetContentTypesSchema = z.object({
 // Schema for strapi_get_components tool
 const GetComponentsSchema = z.object({
     server: z.string().min(1, "Server name is required and cannot be empty"),
-    page: z.number().int().min(1, "Page must be a positive integer").optional().default(1),
-    pageSize: z.number().int().min(1, "Page size must be a positive integer").optional().default(25)
+    page: z.union([
+        z.number().int().min(1, "Page must be a positive integer"),
+        z.string().transform((str, ctx) => {
+            const num = parseInt(str);
+            if (isNaN(num) || num < 1) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Page must be a positive integer"
+                });
+                return z.NEVER;
+            }
+            return num;
+        })
+    ]).optional().default(1),
+    pageSize: z.union([
+        z.number().int().min(1, "Page size must be a positive integer"),
+        z.string().transform((str, ctx) => {
+            const num = parseInt(str);
+            if (isNaN(num) || num < 1) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Page size must be a positive integer"
+                });
+                return z.NEVER;
+            }
+            return num;
+        })
+    ]).optional().default(25)
 }).strict();
 
 // Schema for strapi_rest tool
@@ -481,9 +507,46 @@ const RestSchema = z.object({
     method: z.enum(["GET", "POST", "PUT", "DELETE"], {
         errorMap: () => ({ message: "Method must be one of: GET, POST, PUT, DELETE" })
     }).optional().default("GET"),
-    params: z.record(z.any()).optional(),
-    body: z.record(z.any()).optional(),
-    userAuthorized: z.boolean().optional().default(false)
+    params: z.union([
+        z.record(z.any()),
+        z.string().transform((str, ctx) => {
+            try {
+                return JSON.parse(str);
+            } catch (e) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Params must be a valid JSON object or object"
+                });
+                return z.NEVER;
+            }
+        })
+    ]).optional(),
+    body: z.union([
+        z.record(z.any()),
+        z.string().transform((str, ctx) => {
+            try {
+                return JSON.parse(str);
+            } catch (e) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Body must be a valid JSON object or object"
+                });
+                return z.NEVER;
+            }
+        })
+    ]).optional(),
+    userAuthorized: z.union([
+        z.boolean(),
+        z.string().transform((str, ctx) => {
+            if (str === "true") return true;
+            if (str === "false") return false;
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "userAuthorized must be boolean true/false or string 'true'/'false'"
+            });
+            return z.NEVER;
+        })
+    ]).optional().default(false)
 }).strict().refine(
     (data) => {
         // For write operations, ensure userAuthorized is explicitly set to true
@@ -513,9 +576,33 @@ const UploadMediaSchema = z.object({
     format: z.enum(["jpeg", "png", "webp", "original"], {
         errorMap: () => ({ message: "Format must be one of: jpeg, png, webp, original" })
     }).optional().default("original"),
-    quality: z.number().int().min(1, "Quality must be between 1 and 100").max(100, "Quality must be between 1 and 100").optional().default(80),
+    quality: z.union([
+        z.number().int().min(1, "Quality must be between 1 and 100").max(100, "Quality must be between 1 and 100"),
+        z.string().transform((str, ctx) => {
+            const num = parseInt(str);
+            if (isNaN(num) || num < 1 || num > 100) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Quality must be between 1 and 100"
+                });
+                return z.NEVER;
+            }
+            return num;
+        })
+    ]).optional().default(80),
     metadata: MediaMetadataSchema.optional(),
-    userAuthorized: z.boolean().optional().default(false)
+    userAuthorized: z.union([
+        z.boolean(),
+        z.string().transform((str, ctx) => {
+            if (str === "true") return true;
+            if (str === "false") return false;
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "userAuthorized must be boolean true/false or string 'true'/'false'"
+            });
+            return z.NEVER;
+        })
+    ]).optional().default(false)
 }).strict().refine(
     (data) => {
         // Media upload requires explicit user authorization
