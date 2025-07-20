@@ -726,7 +726,7 @@ function zodToJsonSchema(schema: z.ZodSchema): any {
         }
         
         return {
-            $schema: "https://json-schema.org/draft/2020-12/schema",
+            $schema: "http://json-schema.org/draft-07/schema#",
             type: "object",
             properties,
             required,
@@ -735,7 +735,7 @@ function zodToJsonSchema(schema: z.ZodSchema): any {
     }
     
     return {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $schema: "http://json-schema.org/draft-07/schema#",
         type: "object",
         properties: {},
         required: [],
