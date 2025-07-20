@@ -854,7 +854,7 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.6.0",
+        version: "2.7.1",
     },
     {
         capabilities: {
@@ -1815,7 +1815,7 @@ async function handleStrapiError(response: Response, context: string, requestId?
 async function main() {
     try {
         logger.info("Starting Strapi MCP Server", {
-            version: "2.6.0",
+            version: "2.7.1",
             configuredServers: Object.keys(config).length,
             logLevel: LogLevel[logger.getConfig().level]
         });
