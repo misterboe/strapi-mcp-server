@@ -53,6 +53,27 @@ You can use this server directly with npx in your Claude Desktop configuration:
 }
 ```
 
+Optional local guardrail with [Armorer Guard](https://github.com/ArmorerLabs/Armorer-Guard):
+
+```json
+{
+  "mcpServers": {
+    "strapi": {
+      "command": "armorer-guard",
+      "args": [
+        "mcp-proxy",
+        "--",
+        "npx",
+        "-y",
+        "@bschauer/strapi-mcp-server@2.6.0"
+      ]
+    }
+  }
+}
+```
+
+This wraps the same Strapi MCP server with a local proxy that inspects tool-call arguments for prompt injection, credential leakage, exfiltration risk, and dangerous actions before forwarding safe calls to Strapi.
+
 ## Configuration
 
 Create a configuration file at `~/.mcp/strapi-mcp-server.config.json`:
