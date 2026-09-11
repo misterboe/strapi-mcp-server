@@ -43,7 +43,8 @@ import {
     McpError,
     ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
-import fetch, { Response, RequestInit } from 'node-fetch';
+import fetch from 'node-fetch';
+import type { Response, RequestInit } from 'node-fetch';
 import FormData from 'form-data';
 import sharp from 'sharp';
 import { readFileSync } from 'fs';
@@ -52,6 +53,10 @@ import { join } from 'path';
 import qs from 'qs';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import { lookup as dnsLookup } from 'dns';
+import { isIP } from 'net';
+import { Agent as HttpAgent } from 'http';
+import { Agent as HttpsAgent } from 'https';
 
 // ===========================================
 // Comprehensive Logging and Debugging System
@@ -567,7 +572,7 @@ const MediaMetadataSchema = z.object({
 // Schema for strapi_upload_media tool
 const UploadMediaSchema = z.object({
     server: z.string().min(1, "Server name is required and cannot be empty"),
-    url: z.url({ error: "Must be a valid URL" }),
+    url: z.url({ protocol: /^https?$/, error: "Must be a valid http(s) URL" }),
     format: z.enum(["jpeg", "png", "webp", "original"], {
         error: "Format must be one of: jpeg, png, webp, original"
     }).optional().default("original"),
@@ -915,7 +920,7 @@ try {
 const server = new Server(
     {
         name: "strapi-mcp",
-        version: "2.8.0",
+        version: "2.9.0",
     },
     {
         capabilities: {
@@ -1034,13 +1039,146 @@ async function makeStrapiRequest(
     }
 }
 
-// Helper function to download image as buffer
-async function downloadImage(url: string): Promise<Buffer> {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new McpError(ErrorCode.InternalError, `Failed to download image: ${response.statusText}`);
+// SSRF protection for media downloads: only public http(s) hosts may be fetched.
+// The URL is caller-controlled (potentially by a prompt-injected LLM), so loopback,
+// private, link-local (cloud metadata) and multicast ranges are rejected both for
+// literal IPs and for every DNS resolution result (guards against DNS rebinding).
+const MAX_IMAGE_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_REDIRECTS = 5;
+
+function isPrivateIPv4(ip: string): boolean {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127
+        || (a === 169 && b === 254)
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 100 && b >= 64 && b <= 127)
+        || a >= 224;
+}
+
+function isPrivateAddress(ip: string): boolean {
+    const version = isIP(ip);
+    if (version === 4) {
+        return isPrivateIPv4(ip);
     }
-    return Buffer.from(await response.arrayBuffer());
+    if (version !== 6) {
+        return true;
+    }
+    const lower = ip.toLowerCase();
+    const mappedDotted = lower.match(/^(?:0*:)*ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mappedDotted) {
+        return isPrivateIPv4(mappedDotted[1]);
+    }
+    const mappedHex = lower.match(/^(?:0*:)*ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedHex) {
+        const hi = parseInt(mappedHex[1], 16);
+        const lo = parseInt(mappedHex[2], 16);
+        return isPrivateIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    if (/^(?:0*:)*0*1?$/.test(lower)) {
+        return true; // :: and ::1
+    }
+    return /^f[cd]/.test(lower)       // fc00::/7 unique local
+        || /^fe[89ab]/.test(lower)    // fe80::/10 link-local
+        || /^fe[c-f]/.test(lower)     // fec0::/10 site-local (deprecated)
+        || /^ff/.test(lower);         // multicast
+}
+
+function assertPublicUrl(rawUrl: string): URL {
+    let parsed: URL;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        throw new McpError(ErrorCode.InvalidParams, 'Media URL is not a valid URL');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new McpError(ErrorCode.InvalidParams, 'Media URL must use http or https');
+    }
+    const host = parsed.hostname.replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && isPrivateAddress(host))) {
+        throw new McpError(ErrorCode.InvalidParams, 'Media URL must point to a public host');
+    }
+    return parsed;
+}
+
+// dns.lookup replacement that refuses to hand private addresses to the socket layer
+const guardedLookup: any = (hostname: string, options: any, callback: any) => {
+    const opts = typeof options === 'object' ? { ...options, all: true } : { all: true };
+    dnsLookup(hostname, opts, (err: any, addresses: any) => {
+        if (err) {
+            return callback(err);
+        }
+        const list: { address: string; family: number }[] = Array.isArray(addresses) ? addresses : [];
+        if (list.length === 0 || list.some((entry) => isPrivateAddress(entry.address))) {
+            return callback(new Error(`Refusing to connect to non-public address for ${hostname}`));
+        }
+        if (typeof options === 'object' && options.all) {
+            return callback(null, list);
+        }
+        callback(null, list[0].address, list[0].family);
+    });
+};
+
+const mediaHttpAgent = new HttpAgent({ lookup: guardedLookup });
+const mediaHttpsAgent = new HttpsAgent({ lookup: guardedLookup });
+
+// Helper function to download image as buffer
+async function downloadImage(url: string, requestId?: string): Promise<Buffer> {
+    let current = assertPublicUrl(url);
+
+    for (let hop = 0; hop <= MAX_IMAGE_REDIRECTS; hop++) {
+        let response: Response;
+        try {
+            response = await fetch(current.toString(), {
+                redirect: 'manual',
+                size: MAX_IMAGE_DOWNLOAD_BYTES,
+                agent: (parsedUrl: URL) => parsedUrl.protocol === 'http:' ? mediaHttpAgent : mediaHttpsAgent,
+            });
+        } catch (error) {
+            logger.warn('Image download failed', {
+                requestId,
+                url: current.toString(),
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new McpError(ErrorCode.InternalError, 'Failed to download image from the given URL');
+        }
+
+        if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get('location');
+            if (!location) {
+                throw new McpError(ErrorCode.InternalError, 'Failed to download image from the given URL');
+            }
+            current = assertPublicUrl(new URL(location, current).toString());
+            continue;
+        }
+
+        if (!response.ok) {
+            logger.warn('Image download returned non-success status', {
+                requestId,
+                url: current.toString(),
+                status: response.status
+            });
+            throw new McpError(ErrorCode.InternalError, 'Failed to download image from the given URL');
+        }
+
+        const contentType = response.headers.get('content-type') ?? '';
+        if (!contentType.toLowerCase().startsWith('image/')) {
+            throw new McpError(ErrorCode.InternalError, 'The URL did not return an image');
+        }
+
+        try {
+            return Buffer.from(await response.arrayBuffer());
+        } catch (error) {
+            logger.warn('Image body read failed', {
+                requestId,
+                url: current.toString(),
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new McpError(ErrorCode.InternalError, 'Failed to download image from the given URL');
+        }
+    }
+
+    throw new McpError(ErrorCode.InternalError, 'Too many redirects while downloading image');
 }
 
 // Helper function to process image with Sharp
@@ -1567,7 +1705,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const fileName = url.split('/').pop() || 'image';
 
             // Download the image
-            const imageBuffer = await downloadImage(url);
+            const imageBuffer = await downloadImage(url, requestId);
 
             // Process the image if format conversion is requested
             const processedBuffer = await processImage(imageBuffer, format, quality);
@@ -1771,14 +1909,22 @@ async function handleStrapiError(response: Response, context: string, requestId?
         url: response.url
     });
     
-    return response.json();
+    // Strapi v5 answers DELETE with 204 No Content; other endpoints may return an empty body
+    if (response.status === 204) {
+        return { success: true, status: 204 };
+    }
+    const text = await response.text();
+    if (!text) {
+        return { success: true, status: response.status };
+    }
+    return JSON.parse(text);
 }
 
 // Start the server
 async function main() {
     try {
         logger.info("Starting Strapi MCP Server", {
-            version: "2.8.0",
+            version: "2.9.0",
             configuredServers: Object.keys(config).length,
             logLevel: LogLevel[logger.getConfig().level]
         });

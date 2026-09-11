@@ -1,6 +1,6 @@
 {
     "name": "@bschauer/strapi-mcp-server",
-    "version": "2.8.0",
+    "version": "2.9.0",
     "description": "Model Context Protocol server implementation for Strapi CMS with enhanced security disclaimer and configuration",
     "type": "module",
     "bin": {
@@ -15,8 +15,8 @@
         "build": "tsc && chmod +x build/index.js",
         "build:watch": "tsc --watch",
         "start": "node build/index.js",
-        "dev": "ts-node src/index.ts",
-        "dev:watch": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
+        "dev": "node --experimental-transform-types src/index.ts",
+        "dev:watch": "node --watch --experimental-transform-types src/index.ts",
         "prepublishOnly": "npm run build"
     },
     "publishConfig": {
@@ -31,20 +31,17 @@
     "author": "bschauer",
     "license": "MIT",
     "devDependencies": {
-        "@types/node": "^25.0.3",
-        "nodemon": "^3.1.11",
-        "ts-node": "^10.9.2",
-        "typescript": "^5.9.3"
+        "@types/node": "^26.5.1",
+        "typescript": "^7.0.2"
     },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.25.1",
+        "@modelcontextprotocol/sdk": "^1.30.0",
         "@types/node-fetch": "^2.6.13",
-        "@types/qs": "^6.14.0",
-        "@types/sharp": "^0.31.1",
-        "form-data": "^4.0.5",
+        "@types/qs": "^6.15.1",
+        "form-data": "^4.0.6",
         "node-fetch": "^3.3.2",
-        "qs": "^6.14.1",
-        "sharp": "^0.34.5",
-        "zod": "^4.3.5"
+        "qs": "^6.16.0",
+        "sharp": "^0.35.4",
+        "zod": "^4.6.2"
     }
 }

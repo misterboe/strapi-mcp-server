@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-09-11
+
+### Security
+
+- **SSRF in `strapi_upload_media`**: media downloads accepted any URL and followed redirects blindly, allowing a caller to make the server fetch loopback, private or link-local addresses. Downloads now:
+  - accept `http`/`https` only (schema-level, `data:` and `file:` are rejected)
+  - reject non-public hosts for literal IPs and for every DNS resolution result (guards against DNS rebinding)
+  - re-validate each redirect hop (max 5, `redirect: "manual"`)
+  - require an `image/*` content type and cap the download at 50 MB
+  - report download failures generically so internal reachability is not leaked
+- Thanks to Anas for the responsible report.
+
+### Fixed
+
+- `strapi_rest` DELETE failed with `Unexpected end of JSON input` because Strapi v5 answers with 204 No Content. Empty responses now return `{ "success": true, "status": <code> }`.
+
+### Changed
+
+- Updated dependencies:
+  - `@modelcontextprotocol/sdk`: 1.25.1 → 1.30.0
+  - `zod`: 4.3.5 → 4.6.2
+  - `sharp`: 0.34.5 → 0.35.4
+  - `qs`: 6.14.1 → 6.16.0
+  - `form-data`: 4.0.5 → 4.0.6
+  - `typescript`: 5.9.3 → 7.0.2
+  - `@types/node`: 25.0.3 → 26.5.1
+- `npm run dev` / `npm run dev:watch` now use native Node type stripping (`node --experimental-transform-types`, Node >= 22.7) instead of ts-node/nodemon
+
+### Removed
+
+- `ts-node`, `nodemon` (incompatible with TypeScript 7, replaced by native Node)
+- `@types/sharp` (sharp ships its own types)
+
 ## [2.8.0] - 2025-01-07
 
 ### Fixed

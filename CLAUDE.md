@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run build` - Compile TypeScript to build/ directory and make executable
 - `npm run build:watch` - Build with watch mode for development
 - `npm run start` - Start the compiled server from build/index.js
-- `npm run dev` - Run directly with ts-node for development
-- `npm run dev:watch` - Run with nodemon for hot reload during development
+- `npm run dev` - Run src/index.ts directly via Node type stripping (`--experimental-transform-types`, Node >= 22.7)
+- `npm run dev:watch` - Same with `node --watch` for hot reload during development
 
 ## Debugging
 
